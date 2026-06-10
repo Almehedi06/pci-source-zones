@@ -1,0 +1,79 @@
+site: montecito
+
+paths:
+  dem: /mnt/c/Users/amehedi/Downloads/thomas/topographic__elevation.tif
+  dem_diff: /mnt/c/Users/amehedi/Downloads/thomas/dem_diff.tif
+  processed_dir: data/processed
+  output_dir: /mnt/c/Users/amehedi/Downloads
+
+terrain:
+  fill_sinks: true
+  flow_director: D8
+
+inputs:
+  d50:
+    mode: constant
+    value: 2.0
+    units: mm
+  na:
+    mode: constant
+    value: 0.03
+    units: manning
+  rainfall_excess:
+    mode: constant
+    value: 45.0
+    units: mm/hr
+
+parameters:
+  alpha: 1.167
+  tau_star: 0.043
+  rho_w: 1000.0
+  rho_s: 2650.0
+  g: 9.81
+  k: 0.0474
+  p: 0.1666666667
+  m1: 0.6
+  n1: 0.7
+
+monte_carlo:
+  n_samples: 1500
+  seed: 42
+
+c_sampling:
+  d50:
+    mode: distribution
+    distribution: lognormal
+    mean: 2.0
+    std: 0.48
+    units: mm
+  na:
+    mode: distribution
+    distribution: uniform
+    min: 0.015
+    max: 0.10
+    units: manning
+  rainfall_excess:
+    mode: distribution
+    distribution: uniform
+    min: 15.0
+    max: 55.0
+    units: mm/hr
+
+source_area:
+  output_subdir: source_area_workflow
+  erosion_threshold_m: -0.01
+  use_dod_filter: true
+  top_percent_values: [10, 5]
+  c_min_values: [5, 10, 20, 30, 50, 70]
+  c_channel_max: 120
+  min_polygon_area_m2: 25.0
+
+outputs:
+  pci_threshold: 0.7
+  min_area_m2: 25.0
+  slope: /mnt/c/Users/amehedi/Downloads/slope.tif
+  specific_catchment_area: /mnt/c/Users/amehedi/Downloads/specific_catchment_area.tif
+  topographic_driving_index: /mnt/c/Users/amehedi/Downloads/topographic_driving_index.tif
+  c_model_mean: /mnt/c/Users/amehedi/Downloads/c_model_mean.tif
+  pci: /mnt/c/Users/amehedi/Downloads/pci.tif
+  source_polygons: /mnt/c/Users/amehedi/Downloads/source_polygons.gpkg
