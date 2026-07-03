@@ -20,6 +20,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+ml = ["pandas>=2.0", "scikit-learn>=1.3", "joblib>=1.3"]
+tune = ["optuna>=3.0"]
+xgb = ["xgboost>=2.0"]
 
 [tool.setuptools]
 package-dir = {"" = "src"}

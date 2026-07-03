@@ -1,0 +1,89 @@
+site: montecito
+
+paths:
+  output_dir: /mnt/c/Users/amehedi/Downloads
+
+ml:
+  output_subdir: source_area_workflow/ml/{model}
+
+  base_rasters:
+    slope: /mnt/c/Users/amehedi/Downloads/thomas/S_from_topographic_elevation.tif
+    specific_area: /mnt/c/Users/amehedi/Downloads/thomas/a_from_topographic_elevation.tif
+    g: /mnt/c/Users/amehedi/Downloads/thomas/G_from_topographic_elevation.tif
+    dem_diff: /mnt/c/Users/amehedi/Downloads/thomas/dem_diff.tif
+
+  target:
+    type: physics_dod
+    c_min: 5
+    c_channel: 120
+    erosion_threshold_m: -0.55
+    exclude_channels_from_training: true
+    export: true
+    nodata: 255
+
+  feature_paths:
+    burn_severity: /mnt/c/Users/amehedi/Downloads/thomas/burn_severity_montecito_aoi_aligned.tif
+    soil_texture: /mnt/c/Users/amehedi/Downloads/thomas/soil__texture.tif
+    soil_thickness: /mnt/c/Users/amehedi/Downloads/thomas/soil__thickness.tif
+    soil_density: /mnt/c/Users/amehedi/Downloads/thomas/soil__density.tif
+    sand_total: /mnt/c/Users/amehedi/Downloads/thomas/sand__total.tif
+    silt_total: /mnt/c/Users/amehedi/Downloads/thomas/silt__total.tif
+    clay_total: /mnt/c/Users/amehedi/Downloads/thomas/clay__total.tif
+    porosity: /mnt/c/Users/amehedi/Downloads/thomas/porosity.tif
+    pH: /mnt/c/Users/amehedi/Downloads/thomas/pH.tif
+    field_capacity: /mnt/c/Users/amehedi/Downloads/thomas/field__capacity.tif
+    saturated_water_content: /mnt/c/Users/amehedi/Downloads/thomas/saturated__water_content.tif
+    soil_transmissivity: /mnt/c/Users/amehedi/Downloads/thomas/soil__transmissivity.tif
+    saturated_hydraulic_conductivity: /mnt/c/Users/amehedi/Downloads/thomas/soil__saturated_hydraulic_conductivity.tif
+    landcover: /mnt/c/Users/amehedi/Downloads/thomas/landcover.tif
+    et_diff: /mnt/c/Users/amehedi/Downloads/thomas/gee_lai_ndvi_et/ET_median_pre_2017-04-01_to_2017-08-30_post_2018-04-01_to_2018-08-30_diff_post_minus_pre_aligned.tif
+    ndvi_diff: /mnt/c/Users/amehedi/Downloads/thomas/gee_lai_ndvi_et/NDVI_median_pre_2017-04-01_to_2017-08-30_post_2018-04-01_to_2018-08-30_diff_post_minus_pre_aligned.tif
+
+  features:
+    numeric:
+      - slope
+      - drainage_area
+      - soil_thickness
+      - soil_density
+      - sand_total
+      - silt_total
+      - clay_total
+      - porosity
+      - field_capacity
+      - saturated_water_content
+      - soil_transmissivity
+      - saturated_hydraulic_conductivity
+      - et_diff
+      - ndvi_diff
+    categorical:
+      - burn_severity
+      - soil_texture
+      - landcover
+
+  split:
+    method: polygons
+    seed: 42
+    test_size: 0.2
+    val_size: 0.1
+    negative_to_positive_ratio: 3
+
+    polygons:
+      path: /mnt/c/Users/amehedi/Downloads/dunne_lithology_polygons_unlabeled.gpkg
+      id_field: poly_id
+      train_ids: [3]
+      test_ids: [4]
+
+  model:
+    type: random_forest
+    n_estimators: 100
+    max_depth: null
+    min_samples_split: 2
+    min_samples_leaf: 1
+    max_features: sqrt
+    class_weight: balanced
+    random_state: 42
+    n_jobs: -1
+
+  prediction:
+    probability_threshold: 0.5
+    exclude_channels: true
