@@ -43,7 +43,15 @@ def build_cv_plan(cfg: dict[str, Any], data: MLData, rows: np.ndarray) -> CVPlan
 
     if method == "spatial_blocks":
         groups = _spatial_block_groups(cfg, data, rows, cv_cfg)
-        splitter, n_splits = _group_splitter(cv_cfg, y, groups, seed)
+        base_splitter, n_splits = _group_splitter(cv_cfg, y, groups, seed)
+        buffer_m = float(cv_cfg.get("buffer_m", 0.0))
+        cell_size = abs(float(data.target_data.profile["transform"].a))
+        buffer_pixels = int(np.ceil(buffer_m / cell_size)) if buffer_m > 0 else 0
+        splitter = (
+            _BufferedCV(base_splitter, data, rows, buffer_pixels)
+            if buffer_pixels > 0
+            else base_splitter
+        )
         return CVPlan(
             splitter,
             groups,
@@ -53,6 +61,7 @@ def build_cv_plan(cfg: dict[str, Any], data: MLData, rows: np.ndarray) -> CVPlan
                 "method": method,
                 "n_groups": int(np.unique(groups).size),
                 "block_size_m": float(cv_cfg.get("block_size_m", 250.0)),
+                "buffer_m": buffer_m,
             },
         )
 
@@ -68,6 +77,59 @@ def build_cv_plan(cfg: dict[str, Any], data: MLData, rows: np.ndarray) -> CVPlan
         )
 
     raise ValueError(f"Unsupported ml.tuning.cv.method: {method!r}")
+
+
+class _BufferedCV:
+    """Wraps any sklearn CV splitter and drops val pixels within buffer_m of train pixels.
+
+    Prevents leakage near fold boundaries when spatial autocorrelation is high.
+    Only active when buffer_m > 0; otherwise adds zero overhead.
+    """
+
+    def __init__(
+        self,
+        base_splitter: Any,
+        data: MLData,
+        rows: np.ndarray,
+        buffer_pixels: int,
+    ) -> None:
+        self._base = base_splitter
+        self._data = data
+        self._rows = rows
+        self._buffer_pixels = buffer_pixels
+        self._shape = data.target_data.target.shape
+
+    def split(
+        self, X: Any, y: Any = None, groups: Any = None
+    ):
+        n_rows, n_cols = self._shape
+        bp = self._buffer_pixels
+
+        for tr_local, val_local in self._base.split(X, y, groups):
+            if bp == 0:
+                yield tr_local, val_local
+                continue
+
+            tr_flat = self._data.flat_indices[self._rows[tr_local]]
+            train_mask = np.zeros(self._shape, dtype=bool)
+            train_mask.ravel()[tr_flat] = True
+
+            val_flat = self._data.flat_indices[self._rows[val_local]]
+            val_r = val_flat // n_cols
+            val_c = val_flat % n_cols
+
+            keep = np.ones(len(val_local), dtype=bool)
+            for i, (vr, vc) in enumerate(zip(val_r, val_c)):
+                r0 = max(0, vr - bp)
+                r1 = min(n_rows, vr + bp + 1)
+                c0 = max(0, vc - bp)
+                c1 = min(n_cols, vc + bp + 1)
+                if train_mask[r0:r1, c0:c1].any():
+                    keep[i] = False
+            yield tr_local, val_local[keep]
+
+    def get_n_splits(self, X: Any = None, y: Any = None, groups: Any = None) -> int:
+        return self._base.get_n_splits(X, y, groups)
 
 
 def _safe_n_splits(cv_cfg: dict[str, Any], y: np.ndarray) -> int:

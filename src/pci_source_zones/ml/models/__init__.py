@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .logistic_regression import build_logistic_regression
-from .random_forest import build_random_forest
+from .random_forest import build_random_forest, build_random_forest_regressor
 from .xgboost import build_xgboost
 
 
@@ -19,6 +19,8 @@ def normalize_model_name(name: str) -> str:
         "rf": "random_forest",
         "randomforest": "random_forest",
         "random_forest_classifier": "random_forest",
+        "rfr": "random_forest_regressor",
+        "rf_regressor": "random_forest_regressor",
         "logistic": "logistic_regression",
         "logit": "logistic_regression",
         "lr": "logistic_regression",
@@ -37,6 +39,8 @@ def build_model(model_name: str, cfg: dict[str, Any], numeric: list[str], catego
 
     if model_name == "random_forest":
         return build_random_forest(model_cfg, seed)
+    if model_name == "random_forest_regressor":
+        return build_random_forest_regressor(model_cfg, seed)
     if model_name == "logistic_regression":
         return build_logistic_regression(model_cfg, seed, numeric, categorical)
     if model_name == "xgboost":

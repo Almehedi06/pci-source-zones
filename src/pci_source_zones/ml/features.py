@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from typing import Any
 
@@ -23,6 +24,9 @@ def configured_feature_names(cfg: dict[str, Any]) -> tuple[list[str], list[str]]
     feature_cfg = cfg.get("ml", {}).get("features", {})
     numeric = list(feature_cfg.get("numeric", []))
     categorical = list(feature_cfg.get("categorical", []))
+    exclude = set(feature_cfg.get("exclude", []))
+    numeric = [n for n in numeric if n not in exclude]
+    categorical = [n for n in categorical if n not in exclude]
     return numeric, categorical
 
 
@@ -32,14 +36,14 @@ def build_feature_stack(
 ) -> FeatureStack:
     """Load configured feature rasters and return a flat DataFrame."""
 
-    ml_cfg = cfg.get("ml", {})
+    arrays, profile = _load_base_arrays(cfg)
     numeric, categorical = configured_feature_names(cfg)
     names = numeric + categorical
     if not names:
         raise ValueError("Set ml.features.numeric and/or ml.features.categorical.")
 
-    arrays, profile = _load_base_arrays(cfg)
-    arrays.update(_load_file_features(cfg, reference_shape or _first_shape(arrays), names))
+    ref_shape = reference_shape or _first_shape(arrays)
+    arrays.update(_load_file_features(cfg, ref_shape, names, profile))
     arrays = _add_derived_features(arrays, profile)
 
     missing = [name for name in names if name not in arrays]
@@ -80,7 +84,7 @@ def _load_base_arrays(cfg: dict[str, Any]) -> tuple[dict[str, np.ndarray], dict[
     for name, path in paths.items():
         try:
             arr, prof = read_raster(resolve_path(cfg, path))
-        except FileNotFoundError:
+        except Exception:
             continue
         arrays[name] = arr
         if profile is None:
@@ -95,6 +99,7 @@ def _load_file_features(
     cfg: dict[str, Any],
     shape: tuple[int, int],
     requested_names: list[str],
+    reference_profile: dict[str, Any] | None = None,
 ) -> dict[str, np.ndarray]:
     paths = cfg.get("ml", {}).get("feature_paths", {})
     out: dict[str, np.ndarray] = {}
@@ -102,11 +107,35 @@ def _load_file_features(
         if name not in paths:
             continue
         path = resolve_path(cfg, paths[name])
-        arr, _ = read_raster(path)
+        arr, prof = read_raster(path)
         if arr.shape != shape:
             raise ValueError(f"Feature {name!r} shape {arr.shape} does not match {shape}: {path}")
+        if reference_profile is not None:
+            _check_transform_alignment(name, prof, reference_profile)
         out[name] = arr
     return out
+
+
+def _check_transform_alignment(
+    name: str,
+    profile: dict[str, Any],
+    reference: dict[str, Any],
+) -> None:
+    """Warn if a feature raster has the same shape but a misaligned pixel grid."""
+    t = profile.get("transform")
+    r = reference.get("transform")
+    if t is None or r is None:
+        return
+    # Compare origin and pixel size (affine coefficients 0–5)
+    ref_vals = [r.a, r.b, r.c, r.d, r.e, r.f]
+    feat_vals = [t.a, t.b, t.c, t.d, t.e, t.f]
+    if not all(abs(rv - fv) < 1e-3 for rv, fv in zip(ref_vals, feat_vals)):
+        warnings.warn(
+            f"Feature {name!r} has the same shape as the reference raster but a different "
+            f"pixel grid (transform mismatch). Pixels may be spatially misaligned. "
+            f"Re-snap the raster to the reference grid before training.",
+            stacklevel=4,
+        )
 
 
 def _add_derived_features(arrays: dict[str, np.ndarray], profile: dict[str, Any]) -> dict[str, np.ndarray]:

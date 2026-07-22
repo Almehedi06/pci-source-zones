@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import copy
 import csv
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
+import yaml
 from joblib import dump
+from joblib import load as jload
 
 from .cv import CVPlan, build_cv_plan
 from .dataset import MLData, build_ml_dataset
@@ -26,7 +29,7 @@ def run_tuning_workflow(cfg: dict[str, Any], model_name: str | None = None) -> d
     artifact_name = f"{model_name}_tuned"
     out_dir = ml_output_dir(cfg, artifact_name)
 
-    data = build_ml_dataset(cfg)
+    data = _load_or_cache_dataset(cfg, out_dir)
     train_rows = _tuning_rows(cfg, data)
     model = _base_model(cfg, model_name)
     cv_plan = build_cv_plan(cfg, data, train_rows)
@@ -63,6 +66,9 @@ def run_tuning_workflow(cfg: dict[str, Any], model_name: str | None = None) -> d
 
     metrics_path = write_json(out_dir / f"{artifact_name}_metrics.json", metrics)
     best_path = write_json(out_dir / f"{artifact_name}_best_params.json", tuning_result["best_params"])
+    best_cfg_path = _write_best_config(
+        cfg, tuning_result["best_params"], out_dir / f"{artifact_name}_best.yaml"
+    )
     summary_path = write_json(
         out_dir / f"{artifact_name}_tuning_summary.json",
         {
@@ -103,10 +109,29 @@ def run_tuning_workflow(cfg: dict[str, Any], model_name: str | None = None) -> d
         "feature_scores": scores_path,
         "split_summary": split_path,
         "best_params": best_path,
+        "best_config": best_cfg_path,
         "tuning_summary": summary_path,
         "cv_results": cv_results_path,
         "positive_rule": data.target_data.positive_rule,
     }
+
+
+def _load_or_cache_dataset(cfg: dict[str, Any], out_dir: Path) -> MLData:
+    """Build the ML dataset, caching to disk so reruns skip raster I/O."""
+    tuning_cfg = cfg.get("ml", {}).get("tuning", {})
+    use_cache = bool(tuning_cfg.get("dataset_cache", False))
+    cache_path = out_dir / "ml_dataset_cache.pkl"
+
+    if use_cache and cache_path.exists():
+        print(f"[tuning] Loading cached dataset: {cache_path}")
+        return jload(cache_path)
+
+    data = build_ml_dataset(cfg)
+    if use_cache:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        dump(data, cache_path)
+        print(f"[tuning] Dataset cached: {cache_path}")
+    return data
 
 
 def _base_model(cfg: dict[str, Any], model_name: str):
@@ -350,6 +375,38 @@ def _clean_params(params: dict[str, Any]) -> dict[str, Any]:
             value = value.item()
         out[clean_key] = value
     return out
+
+
+def _write_best_config(
+    cfg: dict[str, Any],
+    best_params: dict[str, Any],
+    path: Path,
+) -> Path:
+    """Write a ready-to-run YAML config with best HP params baked into ml.model.
+
+    Load it directly with --config to reproduce or deploy the best model
+    without manual copy-paste from the tuning results JSON.
+    """
+    out = copy.deepcopy(cfg)
+    model_section = out.setdefault("ml", {}).setdefault("model", {})
+    model_section.update(best_params)
+
+    # Strip tuning section so the output config is a clean eval config
+    out.get("ml", {}).pop("tuning", None)
+
+    # Annotate output subdir so it lands in a distinct folder
+    model_name = model_section.get("type", "model")
+    out["ml"]["output_subdir"] = (
+        out.get("ml", {}).get("output_subdir", "source_area_workflow/ml/{model}")
+        .replace("{model}", f"{model_name}_best")
+    )
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        yaml.dump(out, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+
+    print(f"[tuning] Best config written → {path}")
+    return path
 
 
 def _write_cv_results(path: Path, results: pd.DataFrame) -> Path:

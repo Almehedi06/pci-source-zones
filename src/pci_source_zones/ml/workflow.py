@@ -7,11 +7,11 @@ from typing import Any
 from joblib import dump
 
 from .dataset import MLData, build_ml_dataset
-from .evaluate import evaluate_classifier
+from .evaluate import evaluate_classifier, evaluate_regressor
 from .explain import write_feature_scores
 from .features import configured_feature_names
 from .models import model_name_from_config
-from .outputs import ml_output_dir, write_json, write_uint8_raster
+from .outputs import ml_output_dir, write_float_raster, write_json, write_uint8_raster
 from .predict import write_prediction_maps
 from .train import train_classifier
 
@@ -20,6 +20,9 @@ def run_ml_workflow(cfg: dict[str, Any], model_name: str | None = None) -> dict[
     model_name = model_name_from_config(cfg, model_name)
     out_dir = ml_output_dir(cfg, model_name)
 
+    target_cfg = cfg.get("ml", {}).get("target", {})
+    is_regression = str(target_cfg.get("type", "")).lower() == "raster_continuous"
+
     data = build_ml_dataset(cfg)
     model = train_classifier(model_name, cfg, data)
 
@@ -27,7 +30,7 @@ def run_ml_workflow(cfg: dict[str, Any], model_name: str | None = None) -> dict[
     threshold = float(prediction_cfg.get("probability_threshold", 0.5))
     exclude_channels = bool(prediction_cfg.get("exclude_channels", True))
 
-    metrics = evaluate_classifier(model, data, threshold)
+    metrics = evaluate_regressor(model, data) if is_regression else evaluate_classifier(model, data, threshold)
     paths = write_prediction_maps(model, data, out_dir, model_name, threshold, exclude_channels)
 
     model_path = out_dir / f"{model_name}_model.joblib"
@@ -50,14 +53,21 @@ def run_ml_workflow(cfg: dict[str, Any], model_name: str | None = None) -> dict[
     split_path = write_split_summary(out_dir / "split_summary.csv", data)
 
     target_path: Path | None = None
-    target_cfg = cfg.get("ml", {}).get("target", {})
     if bool(target_cfg.get("export", True)):
-        target_path = write_uint8_raster(
-            out_dir / "ml_target.tif",
-            data.target_data.target,
-            data.target_data.profile,
-            nodata=int(target_cfg.get("nodata", 255)),
-        )
+        if is_regression:
+            target_path = write_float_raster(
+                out_dir / "ml_target.tif",
+                data.target_data.target.astype("float32"),
+                data.target_data.profile,
+                nodata=-9999.0,
+            )
+        else:
+            target_path = write_uint8_raster(
+                out_dir / "ml_target.tif",
+                data.target_data.target,
+                data.target_data.profile,
+                nodata=int(target_cfg.get("nodata", 255)),
+            )
 
     numeric, categorical = configured_feature_names(cfg)
     return {

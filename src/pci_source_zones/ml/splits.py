@@ -26,6 +26,8 @@ def make_splits(
         splits = _polygon_splits(cfg, y_full, valid_mask, profile, split_cfg)
     elif method == "raster":
         splits = _raster_splits(cfg, valid_mask, split_cfg)
+    elif method == "aoi_rasters":
+        splits = _aoi_raster_splits(cfg, valid_mask, split_cfg)
     else:
         raise ValueError(f"Unsupported ml.split.method: {method!r}")
 
@@ -179,6 +181,54 @@ def _split_ids(poly_cfg: dict[str, Any], split_name: str) -> list[Any] | None:
     if not isinstance(ids, list):
         ids = [ids]
     return ids
+
+
+def _aoi_raster_splits(
+    cfg: dict[str, Any],
+    valid_mask: np.ndarray,
+    split_cfg: dict[str, Any],
+) -> dict[str, np.ndarray]:
+    """Split by separate binary AOI rasters for train / val / test.
+
+    Each raster should contain nonzero values where that split is active.
+    Drawn in QGIS and exported as GeoTIFF — most intuitive for GIS users.
+
+    Config example::
+
+        ml:
+          split:
+            method: aoi_rasters
+            train: /path/to/train_aoi.tif
+            val:   /path/to/val_aoi.tif    # optional
+            test:  /path/to/test_aoi.tif
+    """
+    splits: dict[str, np.ndarray] = {}
+    for split_name in ("train", "val", "test"):
+        path_raw = split_cfg.get(split_name)
+        if path_raw is None:
+            continue
+        path = resolve_path(cfg, path_raw)
+        aoi_arr, _ = read_raster(path)
+        if aoi_arr.shape != valid_mask.shape:
+            raise ValueError(
+                f"AOI raster for {split_name!r} has shape {aoi_arr.shape} "
+                f"but valid_mask shape is {valid_mask.shape}. "
+                f"Re-snap the AOI raster to match the feature grid."
+            )
+        active = (aoi_arr > 0) & valid_mask
+        indices = np.flatnonzero(active.ravel())
+        if indices.size == 0:
+            raise ValueError(
+                f"AOI raster for {split_name!r} ({path}) has no overlap "
+                f"with the valid data mask. Check CRS and extent alignment."
+            )
+        splits[split_name] = indices
+
+    if "train" not in splits:
+        raise ValueError("aoi_rasters split requires ml.split.train path.")
+    if "test" not in splits:
+        raise ValueError("aoi_rasters split requires ml.split.test path.")
+    return splits
 
 
 def _raster_splits(

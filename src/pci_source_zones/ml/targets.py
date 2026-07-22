@@ -20,7 +20,7 @@ class TargetData:
 
 
 def build_target(cfg: dict[str, Any]) -> TargetData:
-    """Build a binary ML target from config."""
+    """Build a binary or multiclass ML target from config."""
 
     target_cfg = cfg.get("ml", {}).get("target", {})
     target_type = str(target_cfg.get("type", "physics_dod")).lower()
@@ -35,6 +35,12 @@ def build_target(cfg: dict[str, Any]) -> TargetData:
         target[valid] = (arr[valid] == positive).astype("uint8")
         channel = np.zeros(arr.shape, dtype=bool)
         return TargetData(target, valid, channel, profile, f"raster == {positive}")
+
+    if target_type == "multiclass_raster":
+        return _build_multiclass_target(cfg, target_cfg, nodata)
+
+    if target_type == "raster_continuous":
+        return _build_continuous_target(cfg, target_cfg)
 
     g, profile = _read_g(cfg)
     dem_diff, _ = _read_dem_diff(cfg)
@@ -80,6 +86,68 @@ def _read_g(cfg: dict[str, Any]) -> tuple[np.ndarray, dict[str, Any]]:
     if "g" in base:
         return read_raster(resolve_path(cfg, base["g"]))
     return read_raster(output_path(cfg, "topographic_driving_index", "topographic_driving_index.tif"))
+
+
+def _build_continuous_target(
+    cfg: dict[str, Any],
+    target_cfg: dict[str, Any],
+) -> TargetData:
+    """Load a continuous float raster as regression target (e.g. src_hi 0–1).
+
+    Nodata sentinel: -9999.0 (compatible with PatchDataset).
+    """
+    if "path" not in target_cfg:
+        raise ValueError("raster_continuous target requires ml.target.path.")
+    path = resolve_path(cfg, target_cfg["path"])
+    arr, profile = read_raster(path)
+    valid = np.isfinite(arr)
+    target = np.full(arr.shape, -9999.0, dtype="float32")
+    target[valid] = arr[valid].astype("float32")
+    channel = np.zeros(arr.shape, dtype=bool)
+    return TargetData(target, valid, channel, profile, "continuous raster (regression)")
+
+
+def _build_multiclass_target(
+    cfg: dict[str, Any],
+    target_cfg: dict[str, Any],
+    nodata: int,
+) -> TargetData:
+    """Load a multiclass target raster with an optional integer class map.
+
+    Config example::
+
+        ml:
+          target:
+            type: multiclass_raster
+            path: /path/to/class_labels.tif
+            class_map:            # optional: remap raw pixel values to class ids
+              0: 0                # background / no-erosion
+              1: 1                # rill initiation
+              2: 2                # channel scour
+              3: 3                # deposition
+            nodata: 255
+    """
+    if "path" not in target_cfg:
+        raise ValueError("multiclass_raster target requires ml.target.path.")
+
+    path = resolve_path(cfg, target_cfg["path"])
+    arr, profile = read_raster(path)
+    class_map: dict[int, int] | None = target_cfg.get("class_map", None)
+
+    valid = np.isfinite(arr) & (arr != nodata)
+    target = np.full(arr.shape, nodata, dtype="uint8")
+
+    if class_map:
+        for src_val, dst_val in class_map.items():
+            mask = valid & (arr == int(src_val))
+            target[mask] = int(dst_val)
+    else:
+        target[valid] = arr[valid].astype("uint8")
+
+    classes = sorted(set(int(v) for v in np.unique(target) if int(v) != nodata))
+    rule = f"multiclass ({classes})"
+    channel = np.zeros(arr.shape, dtype=bool)
+    return TargetData(target, valid, channel, profile, rule)
 
 
 def _read_dem_diff(cfg: dict[str, Any]) -> tuple[np.ndarray, dict[str, Any]]:

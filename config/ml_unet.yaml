@@ -9,9 +9,8 @@ ml:
   base_rasters:
     slope: /mnt/c/Users/amehedi/Downloads/thomas/aligned/slope_aligned.tif
     specific_area: /mnt/c/Users/amehedi/Downloads/thomas/aligned/drainage_area_aligned.tif
-    # g and dem_diff not needed for raster_continuous target
-    # g: /mnt/c/Users/amehedi/Downloads/thomas/G_from_topographic_elevation.tif
-    # dem_diff: /mnt/c/Users/amehedi/Downloads/thomas/dem_diff.tif
+    g: /mnt/c/Users/amehedi/Downloads/G_topographic_driving_index.tif
+    dem_diff: /mnt/c/Users/amehedi/Downloads/thomas/dem_diff.tif
 
   target:
     type: raster_continuous
@@ -42,6 +41,7 @@ ml:
     landcover: /mnt/c/Users/amehedi/Downloads/thomas/landcover.tif
     et_diff: /mnt/c/Users/amehedi/Downloads/thomas/gee_lai_ndvi_et/ET_median_pre_2017-04-01_to_2017-08-30_post_2018-04-01_to_2018-08-30_diff_post_minus_pre_aligned.tif
     ndvi_diff: /mnt/c/Users/amehedi/Downloads/thomas/gee_lai_ndvi_et/NDVI_median_pre_2017-04-01_to_2017-08-30_post_2018-04-01_to_2018-08-30_diff_post_minus_pre_aligned.tif
+    curvature: /mnt/c/Users/amehedi/Downloads/thomas/aligned/curvature_aligned.tif
     # --- dDEM sub-grid evidence (1m → 10m aggregates) ---
     frac_sig_erosion: /mnt/c/Users/amehedi/Downloads/dDEM_10m_evidence_from_1m/frac_sig_erosion_10m.tif
     frac_sig_deposition: /mnt/c/Users/amehedi/Downloads/dDEM_10m_evidence_from_1m/frac_sig_deposition_10m.tif
@@ -56,6 +56,7 @@ ml:
     numeric:
       - slope
       - drainage_area
+      - curvature
       # - et_diff
       # - ndvi_diff
       # - soil_thickness
@@ -81,7 +82,7 @@ ml:
     method: random
     seed: 42
     test_size: 0.2
-    val_size: 0.1
+    val_size: 0.0
     # negative_to_positive_ratio: 3   # classification only
     # --- spatial split (re-enable for production) ---
     # method: polygons
@@ -92,15 +93,22 @@ ml:
     #   test_ids: [4]
 
   model:
-    type: random_forest_regressor
-    n_estimators: 100
-    max_depth: null
-    min_samples_split: 2
-    min_samples_leaf: 1
-    max_features: sqrt
-    class_weight: balanced
-    random_state: 42
-    n_jobs: -1
+    type: unet
+    base_filters: 32       # doubles each encoder level: 32→64→128→256→512
+    depth: 4               # number of encoder/decoder levels
+    dropout: 0.2           # spatial dropout inside conv blocks
+
+  unet:
+    patch_size: 128        # pixels (H × W per patch)
+    overlap: 0.5           # 50% overlap between patches (train stride = patch_size/2)
+    batch_size: 16
+    epochs: 50
+    learning_rate: 0.001
+    pos_weight: 3.0        # upweight positive (source) pixels in BCE loss
+    early_stopping_patience: 10
+    val_fraction: 0.15     # fraction of train patches held out for validation
+    num_workers: 0         # DataLoader workers (0 = main process, safe on Windows/WSL2)
+    device: auto           # auto | cpu | cuda
 
   prediction:
     probability_threshold: 0.5
