@@ -13,69 +13,70 @@ ml:
     dem_diff: /mnt/c/Users/amehedi/Downloads/thomas/dem_diff.tif
 
   target:
-    type: raster_continuous
-    path: /mnt/c/Users/amehedi/Downloads/thomas/aligned/target_src_hi_aligned.tif
-    export: true
-    # --- classification target (re-enable to switch back) ---
-    # type: physics_dod
-    # c_min: 5
-    # c_channel: 120
-    # erosion_threshold_m: -0.55
-    # exclude_channels_from_training: true
+    # ── OPTION 1: physics_dod classification (G + DoD thresholds) ──────────
+    type: physics_dod
+    c_min: 5
+    c_channel: 120
+    erosion_threshold_m: -0.55
+    exclude_channels_from_training: true
+    nodata: 255
+
+    # ── OPTION 2: binary from src_hi threshold (run 11_make_binary_label.py first) ──
+    # type: raster
+    # path: /mnt/c/Users/amehedi/Downloads/thomas/aligned/target_binary_t010.tif  # threshold=0.10
+    # positive_value: 1
     # nodata: 255
 
+    # ── OPTION 3: continuous regression ────────────────────────────────────
+    # type: raster_continuous
+    # path: /mnt/c/Users/amehedi/Downloads/thomas/aligned/target_src_hi_aligned.tif
+    # export: true
+
   feature_paths:
-    burn_severity: /mnt/c/Users/amehedi/Downloads/thomas/burn_severity_montecito_aoi_aligned.tif
-    soil_texture: /mnt/c/Users/amehedi/Downloads/thomas/soil__texture.tif
-    soil_thickness: /mnt/c/Users/amehedi/Downloads/thomas/soil__thickness.tif
-    soil_density: /mnt/c/Users/amehedi/Downloads/thomas/soil__density.tif
-    sand_total: /mnt/c/Users/amehedi/Downloads/thomas/sand__total.tif
-    silt_total: /mnt/c/Users/amehedi/Downloads/thomas/silt__total.tif
-    clay_total: /mnt/c/Users/amehedi/Downloads/thomas/clay__total.tif
-    porosity: /mnt/c/Users/amehedi/Downloads/thomas/porosity.tif
-    pH: /mnt/c/Users/amehedi/Downloads/thomas/pH.tif
-    field_capacity: /mnt/c/Users/amehedi/Downloads/thomas/field__capacity.tif
-    saturated_water_content: /mnt/c/Users/amehedi/Downloads/thomas/saturated__water_content.tif
-    soil_transmissivity: /mnt/c/Users/amehedi/Downloads/thomas/soil__transmissivity.tif
-    saturated_hydraulic_conductivity: /mnt/c/Users/amehedi/Downloads/thomas/soil__saturated_hydraulic_conductivity.tif
-    landcover: /mnt/c/Users/amehedi/Downloads/thomas/landcover.tif
-    et_diff: /mnt/c/Users/amehedi/Downloads/thomas/gee_lai_ndvi_et/ET_median_pre_2017-04-01_to_2017-08-30_post_2018-04-01_to_2018-08-30_diff_post_minus_pre_aligned.tif
-    ndvi_diff: /mnt/c/Users/amehedi/Downloads/thomas/gee_lai_ndvi_et/NDVI_median_pre_2017-04-01_to_2017-08-30_post_2018-04-01_to_2018-08-30_diff_post_minus_pre_aligned.tif
-    curvature: /mnt/c/Users/amehedi/Downloads/thomas/aligned/curvature_aligned.tif
-    # --- dDEM sub-grid evidence (1m → 10m aggregates) ---
-    frac_sig_erosion: /mnt/c/Users/amehedi/Downloads/dDEM_10m_evidence_from_1m/frac_sig_erosion_10m.tif
+    curvature:           /mnt/c/Users/amehedi/Downloads/thomas/aligned/curvature_aligned.tif
+    aspect:              /mnt/c/Users/amehedi/Downloads/thomas/aligned/aspect_aligned.tif
+    elevation:           /mnt/c/Users/amehedi/Downloads/thomas/aligned/elevation_aligned.tif
+    burn_severity:       /mnt/c/Users/amehedi/Downloads/thomas/aligned/burn_severity_aligned.tif
+    et_diff:             /mnt/c/Users/amehedi/Downloads/thomas/aligned/et_diff_aligned.tif
+    ndvi_diff:           /mnt/c/Users/amehedi/Downloads/thomas/aligned/ndvi_diff_aligned.tif
+    soil_thickness:      /mnt/c/Users/amehedi/Downloads/thomas/aligned/soil_thickness_aligned.tif
+    sand_total:          /mnt/c/Users/amehedi/Downloads/thomas/aligned/sand_total_aligned.tif
+    silt_total:          /mnt/c/Users/amehedi/Downloads/thomas/aligned/silt_total_aligned.tif
+    clay_total:          /mnt/c/Users/amehedi/Downloads/thomas/aligned/clay_total_aligned.tif
+    porosity:            /mnt/c/Users/amehedi/Downloads/thomas/aligned/porosity_aligned.tif
+    ksat:                /mnt/c/Users/amehedi/Downloads/thomas/aligned/ksat_aligned.tif
+    ph:                  /mnt/c/Users/amehedi/Downloads/thomas/aligned/ph_aligned.tif
+    field_capacity:      /mnt/c/Users/amehedi/Downloads/thomas/aligned/field_capacity_aligned.tif
+    landcover:           /mnt/c/Users/amehedi/Downloads/thomas/aligned/landcover_aligned.tif
+    frac_sig_erosion:    /mnt/c/Users/amehedi/Downloads/dDEM_10m_evidence_from_1m/frac_sig_erosion_10m.tif
     frac_sig_deposition: /mnt/c/Users/amehedi/Downloads/dDEM_10m_evidence_from_1m/frac_sig_deposition_10m.tif
-    std_DoD: /mnt/c/Users/amehedi/Downloads/dDEM_10m_evidence_from_1m/std_DoD_10m.tif
-    median_DoD: /mnt/c/Users/amehedi/Downloads/dDEM_10m_evidence_from_1m/median_DoD_10m.tif
-    # --- dG sub-grid evidence (1m → 10m aggregates) ---
-    frac_dG_positive: /mnt/c/Users/amehedi/Downloads/DeltaG_10m_from_1m/frac_DeltaG_positive_10m_from_1m.tif
-    median_dG: /mnt/c/Users/amehedi/Downloads/DeltaG_10m_from_1m/median_DeltaG_10m_from_1m.tif
-    std_dG: /mnt/c/Users/amehedi/Downloads/DeltaG_10m_from_1m/std_DeltaG_10m_from_1m.tif
+    std_DoD:             /mnt/c/Users/amehedi/Downloads/dDEM_10m_evidence_from_1m/std_DoD_10m.tif
+    frac_dG_positive:    /mnt/c/Users/amehedi/Downloads/DeltaG_10m_from_1m/frac_DeltaG_positive_10m_from_1m.tif
 
   features:
     numeric:
       - slope
       - drainage_area
       - curvature
+      - aspect
+      - elevation
+      # - burn_severity
       # - et_diff
       # - ndvi_diff
       # - soil_thickness
-      # - soil_density
       # - sand_total
       # - silt_total
       # - clay_total
       # - porosity
+      # - ksat
+      # - ph
       # - field_capacity
-      # - saturated_water_content
-      # - soil_transmissivity
-      # - saturated_hydraulic_conductivity
+      # --- evidence features (comment out to avoid leakage) ---
       # - frac_sig_erosion
       # - frac_sig_deposition
       # - std_DoD
       # - frac_dG_positive
     categorical: []
-      # - burn_severity
-      # - soil_texture
       # - landcover
 
   split:

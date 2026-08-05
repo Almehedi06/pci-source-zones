@@ -118,7 +118,7 @@ def run_unet_workflow(cfg: dict[str, Any]) -> dict[str, Any]:
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"[unet] Model: {n_params:,} trainable parameters, {in_channels} input channels")
 
-    model, history = train_unet(model, train_ds, val_ds, cfg, out_dir)
+    model, history = train_unet(model, train_ds, val_ds, cfg, out_dir, is_regression=is_regression)
 
     history_path = write_training_history(history, out_dir / "unet_training_history.csv")
 
@@ -148,21 +148,22 @@ def run_unet_workflow(cfg: dict[str, Any]) -> dict[str, Any]:
         nodata=-9999.0,
     )
 
-    # 8. Binary class raster at configured threshold (classification mode)
-    # threshold = float(cfg.get("ml", {}).get("prediction", {}).get("probability_threshold", 0.5))
-    # class_map = np.full(shape, nodata_val, dtype="uint8")
-    # valid_prob = np.isfinite(prob_map)
-    # class_map[valid_prob] = (prob_map[valid_prob] >= threshold).astype("uint8")
-    # if bool(cfg.get("ml", {}).get("prediction", {}).get("exclude_channels", True)):
-    #     class_map[target_data.channel_mask] = nodata_val
-    # label = f"p{threshold:g}".replace(".", "p")
-    # class_path = write_uint8_raster(
-    #     out_dir / f"unet_source_class_{label}.tif",
-    #     class_map,
-    #     target_data.profile,
-    #     nodata=nodata_val,
-    # )
-    class_path = None  # regression mode: continuous prediction only, no binary class map
+    # 8. Binary class raster at configured threshold (classification mode only)
+    class_path = None
+    if not is_regression:
+        threshold = float(cfg.get("ml", {}).get("prediction", {}).get("probability_threshold", 0.5))
+        class_map = np.full(shape, nodata_val, dtype="uint8")
+        valid_prob = np.isfinite(prob_map)
+        class_map[valid_prob] = (prob_map[valid_prob] >= threshold).astype("uint8")
+        if bool(cfg.get("ml", {}).get("prediction", {}).get("exclude_channels", True)):
+            class_map[target_data.channel_mask] = nodata_val
+        label = f"p{threshold:g}".replace(".", "p")
+        class_path = write_uint8_raster(
+            out_dir / f"unet_source_class_{label}.tif",
+            class_map,
+            target_data.profile,
+            nodata=nodata_val,
+        )
 
     # 9. Evaluate on test/train pixels
     metrics: dict[str, Any] = {}

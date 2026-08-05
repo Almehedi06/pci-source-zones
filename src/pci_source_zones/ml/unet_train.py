@@ -7,31 +7,31 @@ from typing import Any
 import numpy as np
 
 
-# def bce_dice_loss(pred, target, valid_mask, pos_weight: float = 3.0):
-#     """Combined BCE + Dice loss, ignoring nodata pixels via valid_mask.
+def bce_dice_loss(pred, target, valid_mask, pos_weight: float = 3.0):
+    """Combined BCE + Dice loss, ignoring nodata pixels via valid_mask.
 
-#     pred       : (B, 1, H, W) sigmoid output
-#     target     : (B, H, W) float32  {0.0, 1.0}
-#     valid_mask : (B, H, W) bool
-#     """
-#     import torch
-#     import torch.nn.functional as F
+    pred       : (B, 1, H, W) sigmoid output
+    target     : (B, H, W) float32  {0.0, 1.0}
+    valid_mask : (B, H, W) bool
+    """
+    import torch
+    import torch.nn.functional as F
 
-#     p = pred.squeeze(1)  # (B, H, W)
-#     eps = 1e-6
+    p = pred.squeeze(1)  # (B, H, W)
+    eps = 1e-6
 
-#     # Weighted BCE — upweight positives
-#     weight = torch.where(target == 1.0, torch.tensor(pos_weight, device=p.device), torch.ones_like(p))
-#     bce_all = F.binary_cross_entropy(p, target, weight=weight, reduction="none")
-#     bce = (bce_all * valid_mask.float()).sum() / (valid_mask.float().sum() + eps)
+    # Weighted BCE — upweight positives
+    weight = torch.where(target == 1.0, torch.tensor(pos_weight, device=p.device), torch.ones_like(p))
+    bce_all = F.binary_cross_entropy(p, target, weight=weight, reduction="none")
+    bce = (bce_all * valid_mask.float()).sum() / (valid_mask.float().sum() + eps)
 
-#     # Dice over valid pixels
-#     p_v = p[valid_mask]
-#     t_v = target[valid_mask]
-#     intersection = (p_v * t_v).sum()
-#     dice = 1.0 - (2.0 * intersection + eps) / (p_v.sum() + t_v.sum() + eps)
+    # Dice over valid pixels
+    p_v = p[valid_mask]
+    t_v = target[valid_mask]
+    intersection = (p_v * t_v).sum()
+    dice = 1.0 - (2.0 * intersection + eps) / (p_v.sum() + t_v.sum() + eps)
 
-#     return 0.5 * bce + 0.5 * dice
+    return 0.5 * bce + 0.5 * dice
 
 def weighted_mse_loss(pred, target, valid_mask, high_weight: float = 10.0, threshold: float = 0.05):
     import torch
@@ -50,6 +50,7 @@ def train_unet(
     val_dataset: Any,
     cfg: dict[str, Any],
     out_dir: Path,
+    is_regression: bool = False,
 ) -> tuple[Any, list[dict[str, Any]]]:
     """Train UNet with BCE+Dice loss and early stopping.
 
@@ -99,10 +100,11 @@ def train_unet(
     history: list[dict[str, Any]] = []
 
     print(f"Training UNet on {device} | {len(train_dataset)} train patches, {len(val_dataset)} val patches")
+    print(f"  loss: {'weighted_mse' if is_regression else 'bce+dice'}")
 
     for epoch in range(1, epochs + 1):
-        train_loss = _run_epoch(model, train_loader, device, pos_weight, optimizer, training=True)
-        val_loss = _run_epoch(model, val_loader, device, pos_weight, training=False)
+        train_loss = _run_epoch(model, train_loader, device, pos_weight, optimizer, training=True, is_regression=is_regression)
+        val_loss = _run_epoch(model, val_loader, device, pos_weight, training=False, is_regression=is_regression)
         scheduler.step(val_loss)
 
         lr_now = optimizer.param_groups[0]["lr"]
@@ -140,6 +142,7 @@ def _run_epoch(
     pos_weight: float,
     optimizer: Any = None,
     training: bool = True,
+    is_regression: bool = False,
 ) -> float:
     import torch
 
@@ -155,8 +158,10 @@ def _run_epoch(
             valid = valid.to(device)
 
             pred = model(x)
-            # bce_dice_loss(pred, y, valid, pos_weight)  # classification
-            loss = weighted_mse_loss(pred, y, valid)
+            if is_regression:
+                loss = weighted_mse_loss(pred, y, valid)
+            else:
+                loss = bce_dice_loss(pred, y, valid, pos_weight)
 
             if training:
                 optimizer.zero_grad()
