@@ -1,0 +1,4 @@
+# Experiment 02 — Erkan's proposal: union (OR) method
+# p_obs = P(C2) + P(C3) - P(C2 AND C3)
+params:
+  p_obs_method: union

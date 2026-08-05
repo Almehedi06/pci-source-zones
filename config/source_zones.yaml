@@ -1,0 +1,45 @@
+site: montecito
+
+# ── Input data (all 1m) ──────────────────────────────────────────
+inputs:
+  g_pre_1m:     /mnt/c/Users/amehedi/Downloads/thomas/G_1m_dinf_delta/G_pre_dinf.tif
+  delta_g_1m:   /mnt/c/Users/amehedi/Downloads/thomas/G_1m_dinf_delta/DeltaG_1m_dinf.tif
+  ddem_1m:      /mnt/c/Users/amehedi/Downloads/LoD_filtered_dDEM/dDEM_LoD95_filtered_change.tif
+  stable_cells: /mnt/c/Users/amehedi/Downloads/Thomas_xDEM/final_stable_cells.tif
+  dem_pre:      /mnt/c/Users/amehedi/Downloads/thomas/dem_pre.tif
+
+# ── Output directories ───────────────────────────────────────────
+output_dir:
+  labels:  /mnt/c/Users/amehedi/Downloads/source_zone_labels
+  aligned: /mnt/c/Users/amehedi/Downloads/thomas/aligned
+
+# ── Reference grid (for alignment) ──────────────────────────────
+reference_grid: /mnt/c/Users/amehedi/Downloads/thomas/dem_diff.tif
+
+# ── Parameters ───────────────────────────────────────────────────
+params:
+  block_size:        10     # 1m -> 10m aggregation
+  dg_lod_method:     nmad   # LoD method: "nmad" = 2 x 1.4826 x median(|dG|) in stable cells
+  ddem_threshold:    0.0    # dDEM < 0 for C3 (LoD filtering already applied by Lauren)
+  save_intermediates: true  # true = save 1m LoD-filtered dG; false = skip (production)
+  g_star_cap: null          # clip G_star at this value (Dinf artifacts near channels); null = no cap
+  p_obs_method: intersection  # "intersection" = P(C2&C3)  |  "union" = P(C2)+P(C3)-P(C2&C3)
+
+# ── LoD channel exclusion (for compute_dg_lod.py only) ──────────
+lod_channel_exclusion:
+  apply:           false  # true = exclude channel pixels from LoD sample
+  g_channel:       120    # pixels with G_pre >= g_channel are excluded
+  use_stable_only: false  # false = use ALL AOI pixels; true = stable cells only
+
+# ── Knowledge-based masking (optional, separate from core p_obs) ─
+masking:
+  apply:     true    # true = apply G-based masks; false = no masking (data-driven)
+  g_min:     5       # mask pixels where G_pre < g_min  (ridges/flats)
+  g_channel: 200     # mask pixels where G_pre >= g_channel  (hillslope threshold, Erkan)
+
+# ── C_eff soil resistance inversion (compute_ceff.py) ────────────
+ceff:
+  p_obs_method:    union  # which p_obs layer to use: "intersection" or "union"
+  elev_min:        600    # lower elevation bound for hillslope Gamma fit domain (m)
+  g_hillslope_max: 200    # upper G bound for hillslope domain (excludes channels)
+  g_mean_min:      0      # exclude cells with G_mean <= this in inversion
