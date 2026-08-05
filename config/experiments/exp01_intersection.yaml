@@ -1,0 +1,4 @@
+# Experiment 01 — Baseline: intersection (AND) method
+# p_obs = P(C2 AND C3) = fraction where both ΔG and dDEM fired
+params:
+  p_obs_method: intersection
