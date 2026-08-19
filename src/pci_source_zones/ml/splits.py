@@ -268,6 +268,70 @@ def _mask_from_polygons(
     return geometry_mask(geom, out_shape=shape, transform=profile["transform"], invert=True)
 
 
+def polygon_group_raster(
+    cfg: dict[str, Any],
+    profile: dict[str, Any],
+    shape: tuple[int, int],
+    split_cfg: dict[str, Any],
+) -> tuple[np.ndarray, list[Any]] | None:
+    """Rasterize the train polygons, one integer label per polygon.
+
+    Returns (group_raster, ids) where group_raster holds 1..N inside the Nth
+    train polygon and 0 outside, and ids[i] is the original polygon id for
+    label i+1. Used to build spatially-grouped (leave-one-polygon-out) folds
+    for UNet patch sampling, mirroring what cv.py::_polygon_groups does for
+    the tabular models.
+
+    Returns None when the split isn't polygon-based, or uses per-split
+    polygon files (no per-polygon ids to group by).
+    """
+    from rasterio.features import rasterize
+
+    if str(split_cfg.get("method", "random")).lower() != "polygons":
+        return None
+
+    poly_cfg = split_cfg.get("polygons", {})
+    if "path" not in poly_cfg:
+        return None
+
+    ids = _split_ids(poly_cfg, "train")
+    if not ids:
+        return None
+
+    gdf = gpd.read_file(resolve_data_path(cfg, poly_cfg["path"]))
+    id_field = str(poly_cfg.get("id_field", "poly_id"))
+    if id_field not in gdf.columns:
+        raise ValueError(f"Polygon field {id_field!r} not found in {poly_cfg['path']}.")
+    if gdf.crs is not None and profile.get("crs") is not None:
+        gdf = gdf.to_crs(profile["crs"])
+
+    shapes = []
+    kept_ids: list[Any] = []
+    for poly_id in ids:
+        geoms = [
+            g
+            for g in gdf[gdf[id_field] == poly_id].geometry
+            if g is not None and not g.is_empty
+        ]
+        if not geoms:
+            continue
+        kept_ids.append(poly_id)
+        label = len(kept_ids)
+        shapes.extend((g, label) for g in geoms)
+
+    if not shapes:
+        return None
+
+    group_raster = rasterize(
+        shapes,
+        out_shape=shape,
+        transform=profile["transform"],
+        fill=0,
+        dtype="int32",
+    )
+    return group_raster, kept_ids
+
+
 def polygon_train_region_mask(
     cfg: dict[str, Any],
     profile: dict[str, Any],

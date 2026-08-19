@@ -20,15 +20,18 @@ from .outputs import ml_output_dir, write_float_raster, write_json, write_uint8_
 from .patch_dataset import (
     PatchDataset,
     TobitPatchDataset,
+    assign_patch_groups,
     compute_norm_stats,
+    leave_one_polygon_out_indices,
     load_norm_stats,
     normalize_features,
+    pad_like_patches,
     save_norm_stats,
     stack_feature_arrays,
 )
 from .preflight import run_preflight
 from .provenance import new_run_id, write_run_manifest
-from .splits import polygon_train_region_mask
+from .splits import polygon_group_raster, polygon_train_region_mask
 from .targets import build_target
 from .unet_predict import extract_pixel_probs, predict_sliding_window
 from .unet_train import train_unet, write_training_history
@@ -177,13 +180,17 @@ def run_unet_workflow(cfg: dict[str, Any]) -> dict[str, Any]:
             patch_size=patch_size, stride=stride, nodata=nodata_val, augment=True,
         )
 
-    n_total = len(full_train_ds)
-    n_val = max(1, int(n_total * val_frac))
-    n_train = n_total - n_val
-    rng = np.random.default_rng(int(cfg.get("ml", {}).get("split", {}).get("seed", 42)))
-    idx = rng.permutation(n_total)
+    train_idx, val_idx, val_desc = _train_val_patch_indices(
+        cfg, full_train_ds.locations, patch_size, shape, target_data.profile, val_frac
+    )
+    n_train, n_val = len(train_idx), len(val_idx)
+    if n_train == 0 or n_val == 0:
+        raise ValueError(
+            f"Patch train/val split produced train={n_train}, val={n_val}. "
+            f"Lower ml.unet.patch_size or raise overlap so patches fit inside the polygons."
+        )
 
-    train_ds = Subset(full_train_ds, idx[:n_train].tolist())
+    train_ds = Subset(full_train_ds, train_idx)
 
     if tobit_mode and censored_arr is not None:
         val_ds_raw = TobitPatchDataset.from_data_tobit(
@@ -196,9 +203,10 @@ def run_unet_workflow(cfg: dict[str, Any]) -> dict[str, Any]:
             features_norm, target_data.target, patch_indices, shape,
             patch_size=patch_size, stride=stride, nodata=nodata_val, augment=False,
         )
-    val_ds = Subset(val_ds_raw, idx[n_train:].tolist())
+    val_ds = Subset(val_ds_raw, val_idx)
 
     print(f"[unet] Patches — train: {n_train}, val: {n_val}, patch_size: {patch_size}")
+    print(f"[unet] Validation: {val_desc}")
 
     # 5. Build and train UNet
     in_channels = features_2d.shape[0]
@@ -338,6 +346,7 @@ def run_unet_workflow(cfg: dict[str, Any]) -> dict[str, Any]:
         "in_channels": in_channels,
         "n_train_patches": n_train,
         "n_val_patches": n_val,
+        "validation": val_desc,
     }
 
 
@@ -345,3 +354,83 @@ def _pixels_in(flat_indices: np.ndarray, shape: tuple[int, int]) -> np.ndarray:
     mask = np.zeros(shape, dtype=bool)
     mask.ravel()[flat_indices] = True
     return mask
+
+
+def _train_val_patch_indices(
+    cfg: dict[str, Any],
+    locations: list[tuple[int, int]],
+    patch_size: int,
+    shape: tuple[int, int],
+    profile: dict[str, Any],
+    val_frac: float,
+) -> tuple[list[int], list[int], str]:
+    """Choose which patches train and which validate.
+
+    Prefers leave-one-polygon-out: validation patches come from a whole
+    held-out train polygon, and any patch touching that polygon is excluded
+    from training. A random patch split (the alternative) puts neighbouring,
+    strongly autocorrelated patches on both sides, so val loss reads
+    optimistically and early stopping / HP choices are made on an inflated
+    signal.
+
+    Controlled by ml.unet.val_method: auto (default) | polygon_groups | random,
+    and ml.unet.val_polygon_id to pick which polygon is held out.
+    """
+    unet_cfg = cfg.get("ml", {}).get("unet", {}) or {}
+    split_cfg = cfg.get("ml", {}).get("split", {})
+    method = str(unet_cfg.get("val_method", "auto")).lower()
+    seed = int(split_cfg.get("seed", 42))
+
+    if method in {"auto", "polygon_groups"}:
+        grouped = polygon_group_raster(cfg, profile, shape, split_cfg)
+        if grouped is None:
+            if method == "polygon_groups":
+                raise ValueError(
+                    "ml.unet.val_method: polygon_groups requires ml.split.method: polygons "
+                    "with a polygons.path and train_ids."
+                )
+        else:
+            group_raster, ids = grouped
+            padded = pad_like_patches(group_raster, shape, patch_size, fill=0)
+            dominant, touches = assign_patch_groups(locations, patch_size, padded)
+
+            held_out = _choose_held_out_group(unet_cfg, ids, dominant)
+            train_idx, val_idx = leave_one_polygon_out_indices(dominant, touches, held_out)
+            dropped = len(locations) - len(train_idx) - len(val_idx)
+            desc = (
+                f"leave-one-polygon-out, holding out polygon id={ids[held_out - 1]} "
+                f"({len(val_idx)} val patches; {dropped} boundary-straddling patches dropped "
+                f"from both sides)"
+            )
+            return train_idx, val_idx, desc
+
+    # Fallback: random patch split (spatially leaky — only for non-polygon splits)
+    n_total = len(locations)
+    n_val = max(1, int(n_total * val_frac))
+    idx = np.random.default_rng(seed).permutation(n_total)
+    desc = (
+        f"random {val_frac:.0%} patch split — NOTE: spatially autocorrelated with train, "
+        f"so val loss is optimistic (no polygon split available for this config)"
+    )
+    return idx[n_val:].tolist(), idx[:n_val].tolist(), desc
+
+
+def _choose_held_out_group(
+    unet_cfg: dict[str, Any],
+    ids: list[Any],
+    dominant: np.ndarray,
+) -> int:
+    """Pick which polygon (1-based group label) to hold out for validation."""
+    requested = unet_cfg.get("val_polygon_id")
+    if requested is not None:
+        if requested not in ids:
+            raise ValueError(
+                f"ml.unet.val_polygon_id={requested!r} is not one of the train polygon ids {ids}."
+            )
+        return ids.index(requested) + 1
+
+    # Default: the polygon holding the most patches, so the held-out fold is
+    # large enough to give a usable validation signal.
+    counts = np.bincount(dominant, minlength=len(ids) + 1)
+    counts[0] = 0
+    return int(counts.argmax())

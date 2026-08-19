@@ -14,6 +14,23 @@ Each run's output directory is timestamped (`.../ml/{model}/{run_id}/`) and cont
 `run_manifest.json` recording the exact config, git commit, and input-file fingerprints
 that produced it.
 
+## Validation splits
+
+Both the tabular models and the UNet validate on spatially separated data, because
+neighbouring pixels are strongly autocorrelated and a random split would leak:
+
+- **RF / XGBoost** — `ml.tuning.cv.method: polygon_groups` gives leave-one-polygon-out CV
+  over the train polygons (`cv.py`).
+- **UNet** — `ml.unet.val_method` (default `auto`) holds out one whole train polygon's
+  patches for validation. Because a patch is much wider than a pixel, any patch that
+  merely *touches* the held-out polygon is dropped from training too, rather than being
+  allowed to leak validation pixels in. Set `ml.unet.val_polygon_id` to choose which
+  polygon is held out (default: whichever contains the most patches); `val_method: random`
+  restores the old, spatially leaky behaviour and is only appropriate for non-spatial splits.
+
+The test polygons are never touched by either mechanism — they are for the final
+evaluation only.
+
 ## How paths resolve
 
 All relative filenames in the config are resolved against `paths.data_dir`.

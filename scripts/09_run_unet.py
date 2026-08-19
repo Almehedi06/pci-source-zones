@@ -34,6 +34,7 @@ def main() -> None:
     print(f"in_channels     : {result['in_channels']}")
     print(f"train_patches   : {result['n_train_patches']}")
     print(f"val_patches     : {result['n_val_patches']}")
+    print(f"validation      : {result['validation']}")
     print(f"target          : {result['target']}")
     print(f"prediction      : {result['prediction']}")
     if result.get("class"):

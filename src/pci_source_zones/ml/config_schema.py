@@ -179,6 +179,9 @@ class UnetConfig(BaseModel):
     pos_weight: float = 3.0
     early_stopping_patience: int = 10
     val_fraction: float = 0.15
+    # auto = leave-one-polygon-out when the split is polygon-based, else random
+    val_method: Literal["auto", "polygon_groups", "random"] = "auto"
+    val_polygon_id: Any = None  # which train polygon to hold out; default = most patches
     num_workers: int = 0
     device: str = "auto"
     use_all_pixels: bool = False
