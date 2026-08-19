@@ -1,0 +1,103 @@
+site: montecito
+
+# UNet tuning, stage 2 — the training/architecture hyperparameters left out of
+# the first sweep (learning_rate, dropout, batch_size, depth, attention).
+#
+# Patch geometry is FIXED at the stage-1 result: overlap=0.75 was the one
+# effect that cleared fold noise, and patch_size/base_filters showed none, so
+# they are pinned rather than re-searched. That keeps this sweep about the
+# remaining knobs only.
+#
+# Full grid would be 3*3*3*2*2 = 108 combos x 3 folds = 324 trainings, so this
+# uses random search over the grid instead.
+#
+# Expect this to find little: at ~109 training patches the fold-to-fold spread
+# was ~10x the config-to-config spread in stage 1. Re-run when more training
+# polygons (or a second fire) exist.
+
+paths:
+  output_dir: /home/abdullah/ml_output
+  data_dir: /mnt/c/Users/amehedi/Downloads/thomas/aligned
+
+ml:
+  output_subdir: source_area_workflow/ml/{model}
+
+  base_rasters:
+    slope:         slope_aligned.tif
+    specific_area: drainage_area_aligned.tif
+
+  target:
+    type: raster_continuous
+    path: p_obs_union_aligned.tif
+    export: false
+
+  feature_paths:
+    G:             /mnt/c/Users/amehedi/Downloads/G_topographic_driving_index.tif
+    curvature:     curvature_aligned.tif
+    aspect:        aspect_aligned.tif
+    elevation:     elevation_aligned.tif
+    et_diff:       et_diff_aligned.tif
+    ndvi_diff:     ndvi_diff_aligned.tif
+    soil_thickness: soil_thickness_aligned.tif
+    sand_total:    sand_total_aligned.tif
+    silt_total:    silt_total_aligned.tif
+    ksat:          ksat_aligned.tif
+    ph:            ph_aligned.tif
+    precip_jan9:   precip_jan9_aligned.tif
+
+  features:
+    numeric:
+      - G
+      - slope
+      - drainage_area
+      - curvature
+      - aspect
+      - elevation
+      - et_diff
+      - ndvi_diff
+      - soil_thickness
+      - sand_total
+      - silt_total
+      - ksat
+      - ph
+      - precip_jan9
+    categorical: []
+
+  split:
+    method: polygons
+    polygons:
+      path:      /mnt/c/Users/amehedi/Downloads/train_test_poly1.gpkg
+      id_field:  id
+      train_ids: [1, 2, 3, 4, 5, 6]
+      test_ids:  [7, 8]
+    val_size: 0.1
+
+  model:
+    type: unet
+    tobit: false
+    base_filters: 32        # pinned from stage 1
+
+  unet:
+    patch_size: 128         # pinned from stage 1
+    overlap: 0.75           # pinned from stage 1 — the one robust finding
+    epochs: 1000
+    early_stopping_patience: 25
+    use_all_pixels: true
+    num_workers: 0
+    device: auto
+
+  tuning:
+    search_method: random_search
+    n_iter: 20              # of 108 possible combinations
+    random_state: 42
+    max_epochs: 120
+
+    cv:
+      n_splits: 3           # leave-one-polygon-out over polygons 1-3
+
+    search_space:
+      learning_rate: [0.0005, 0.001, 0.002]
+      dropout:       [0.1, 0.2, 0.3]
+      batch_size:    [8, 16, 32]
+      depth:         [3, 4]
+      attention:     [true, false]
