@@ -22,6 +22,7 @@ def main() -> None:
 
     result = run_tuning_workflow(load_config(args.config), model_name=args.model)
     print(f"model_name: {result['model_name']}")
+    print(f"run_id: {result['run_id']}")
     print(f"output_dir: {result['output_dir']}")
     print(f"positive_rule: {result['positive_rule']}")
     print(f"target: {result['target']}")

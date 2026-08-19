@@ -10,14 +10,37 @@ import rasterio
 from pci_source_zones.config import resolve_path
 
 
-def ml_output_dir(cfg: dict[str, Any], model_name: str) -> Path:
+def ml_output_dir(cfg: dict[str, Any], model_name: str, run_id: str | None = None) -> Path:
+    """Resolve (and create) the output directory for a training run.
+
+    With run_id, each run gets its own immutable subdirectory
+    (.../ml/{model_name}/{run_id}/) so a rerun can never silently overwrite
+    a previous run's model/metrics — every current workflow function passes
+    one. run_id=None keeps the old flat (.../ml/{model_name}/) behavior for
+    any other/future direct caller.
+    """
     ml_cfg = cfg.get("ml", {})
     subdir = ml_cfg.get("output_subdir", f"source_area_workflow/ml/{model_name}")
     subdir = str(subdir).format(model=model_name)
     out_root = resolve_path(cfg, cfg.get("paths", {}).get("output_dir", "data/outputs"))
     out_dir = out_root / subdir
+    if run_id is not None:
+        out_dir = out_dir / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
     return out_dir
+
+
+def ml_cache_dir(cfg: dict[str, Any], model_name: str) -> Path:
+    """Stable (non-timestamped) cache directory, independent of run_id.
+
+    Used for the tuning dataset cache: it must survive across separate
+    tuning invocations to be useful, so it cannot live inside a per-run
+    ml_output_dir() — every run would get a fresh, empty cache otherwise.
+    """
+    out_root = resolve_path(cfg, cfg.get("paths", {}).get("output_dir", "data/outputs"))
+    cache_dir = out_root / ".cache" / model_name
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir
 
 
 def write_float_raster(

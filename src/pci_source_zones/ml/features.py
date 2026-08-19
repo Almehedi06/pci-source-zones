@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import warnings
 from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
-from pci_source_zones.config import output_path, resolve_path
+from pci_source_zones.config import output_path, resolve_data_path, resolve_path
 from pci_source_zones.inputs import read_raster
 
 
@@ -83,7 +82,7 @@ def _load_base_arrays(cfg: dict[str, Any]) -> tuple[dict[str, np.ndarray], dict[
 
     for name, path in paths.items():
         try:
-            arr, prof = read_raster(resolve_path(cfg, path))
+            arr, prof = read_raster(resolve_data_path(cfg, path))
         except Exception:
             continue
         arrays[name] = arr
@@ -106,7 +105,7 @@ def _load_file_features(
     for name in requested_names:
         if name not in paths:
             continue
-        path = resolve_path(cfg, paths[name])
+        path = resolve_data_path(cfg, paths[name])
         arr, prof = read_raster(path)
         if arr.shape != shape:
             raise ValueError(f"Feature {name!r} shape {arr.shape} does not match {shape}: {path}")
@@ -121,7 +120,14 @@ def _check_transform_alignment(
     profile: dict[str, Any],
     reference: dict[str, Any],
 ) -> None:
-    """Warn if a feature raster has the same shape but a misaligned pixel grid."""
+    """Raise if a feature raster has the same shape but a misaligned pixel grid.
+
+    Same shape with a different transform silently produces spatially wrong
+    training data — pixel [i, j] would mean a different real-world location
+    in this raster than in every other feature. That must fail loudly: a
+    warning is easy to miss in a long training log, and training would
+    otherwise proceed on misaligned data without any error.
+    """
     t = profile.get("transform")
     r = reference.get("transform")
     if t is None or r is None:
@@ -130,11 +136,11 @@ def _check_transform_alignment(
     ref_vals = [r.a, r.b, r.c, r.d, r.e, r.f]
     feat_vals = [t.a, t.b, t.c, t.d, t.e, t.f]
     if not all(abs(rv - fv) < 1e-3 for rv, fv in zip(ref_vals, feat_vals)):
-        warnings.warn(
+        raise ValueError(
             f"Feature {name!r} has the same shape as the reference raster but a different "
-            f"pixel grid (transform mismatch). Pixels may be spatially misaligned. "
-            f"Re-snap the raster to the reference grid before training.",
-            stacklevel=4,
+            f"pixel grid (transform mismatch: {feat_vals} vs reference {ref_vals}). "
+            f"Pixels would be spatially misaligned. Re-snap the raster to the reference grid "
+            f"(scripts/10_align_features.py) before training."
         )
 
 

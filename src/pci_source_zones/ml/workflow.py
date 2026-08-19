@@ -13,12 +13,17 @@ from .features import configured_feature_names
 from .models import model_name_from_config
 from .outputs import ml_output_dir, write_float_raster, write_json, write_uint8_raster
 from .predict import write_prediction_maps
+from .preflight import run_preflight
+from .provenance import new_run_id, write_run_manifest
 from .train import train_classifier
 
 
 def run_ml_workflow(cfg: dict[str, Any], model_name: str | None = None) -> dict[str, Any]:
+    cfg, data_report = run_preflight(cfg)
     model_name = model_name_from_config(cfg, model_name)
-    out_dir = ml_output_dir(cfg, model_name)
+    run_id = new_run_id()
+    out_dir = ml_output_dir(cfg, model_name, run_id=run_id)
+    write_run_manifest(cfg, out_dir, run_id, data_report)
 
     target_cfg = cfg.get("ml", {}).get("target", {})
     is_regression = str(target_cfg.get("type", "")).lower() == "raster_continuous"
@@ -72,10 +77,12 @@ def run_ml_workflow(cfg: dict[str, Any], model_name: str | None = None) -> dict[
     numeric, categorical = configured_feature_names(cfg)
     return {
         "model_name": model_name,
+        "run_id": run_id,
         "output_dir": out_dir,
         "target": target_path,
-        "probability": paths["probability"],
-        "class": paths["class"],
+        "prediction": paths.get("prediction"),    # regression only
+        "probability": paths.get("probability"),  # classification only
+        "class": paths.get("class"),              # classification only
         "model": model_path,
         "metrics": metrics_path,
         "feature_scores": scores_path,
@@ -89,10 +96,19 @@ def run_ml_workflow(cfg: dict[str, Any], model_name: str | None = None) -> dict[
 
 def write_split_summary(path: Path, data: MLData) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
+    is_continuous = data.y.dtype.kind == "f" or data.y.max() > 1
     with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["split", "n", "positive", "negative"])
-        for name, rows in data.splits.items():
-            yy = data.y[rows]
-            writer.writerow([name, len(rows), int((yy == 1).sum()), int((yy == 0).sum())])
+        if is_continuous:
+            writer.writerow(["split", "n", "mean_y", "std_y", "min_y", "max_y"])
+            for name, rows in data.splits.items():
+                yy = data.y[rows].astype("float32")
+                writer.writerow([name, len(rows),
+                                  f"{yy.mean():.3f}", f"{yy.std():.3f}",
+                                  f"{yy.min():.3f}", f"{yy.max():.3f}"])
+        else:
+            writer.writerow(["split", "n", "positive", "negative"])
+            for name, rows in data.splits.items():
+                yy = data.y[rows]
+                writer.writerow([name, len(rows), int((yy == 1).sum()), int((yy == 0).sum())])
     return path

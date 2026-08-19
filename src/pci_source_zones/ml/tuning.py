@@ -13,23 +13,29 @@ from joblib import load as jload
 
 from .cv import CVPlan, build_cv_plan
 from .dataset import MLData, build_ml_dataset
-from .evaluate import evaluate_classifier
+from .evaluate import evaluate_classifier, evaluate_regressor
 from .explain import write_feature_scores
 from .features import configured_feature_names
 from .models import build_model, model_name_from_config
-from .outputs import ml_output_dir, write_json, write_uint8_raster
+from .outputs import ml_cache_dir, ml_output_dir, write_float_raster, write_json, write_uint8_raster
 from .predict import write_prediction_maps
+from .preflight import run_preflight
+from .provenance import new_run_id, write_run_manifest
+from sklearn.base import is_regressor
 from .workflow import write_split_summary
 
 
 def run_tuning_workflow(cfg: dict[str, Any], model_name: str | None = None) -> dict[str, Any]:
     """Tune one classifier on the training split, then evaluate final holdout splits."""
 
+    cfg, data_report = run_preflight(cfg)
     model_name = model_name_from_config(cfg, model_name)
     artifact_name = f"{model_name}_tuned"
-    out_dir = ml_output_dir(cfg, artifact_name)
+    run_id = new_run_id()
+    out_dir = ml_output_dir(cfg, artifact_name, run_id=run_id)
+    write_run_manifest(cfg, out_dir, run_id, data_report)
 
-    data = _load_or_cache_dataset(cfg, out_dir)
+    data = _load_or_cache_dataset(cfg, ml_cache_dir(cfg, artifact_name))
     train_rows = _tuning_rows(cfg, data)
     model = _base_model(cfg, model_name)
     cv_plan = build_cv_plan(cfg, data, train_rows)
@@ -40,7 +46,8 @@ def run_tuning_workflow(cfg: dict[str, Any], model_name: str | None = None) -> d
     threshold = float(prediction_cfg.get("probability_threshold", 0.5))
     exclude_channels = bool(prediction_cfg.get("exclude_channels", True))
 
-    metrics = evaluate_classifier(tuned_model, data, threshold)
+    regression = is_regressor(tuned_model)
+    metrics = evaluate_regressor(tuned_model, data) if regression else evaluate_classifier(tuned_model, data, threshold)
     paths = write_prediction_maps(
         tuned_model,
         data,
@@ -91,19 +98,28 @@ def run_tuning_workflow(cfg: dict[str, Any], model_name: str | None = None) -> d
     target_path: Path | None = None
     target_cfg = cfg.get("ml", {}).get("target", {})
     if bool(target_cfg.get("export", True)):
-        target_path = write_uint8_raster(
-            out_dir / "ml_target.tif",
-            data.target_data.target,
-            data.target_data.profile,
-            nodata=int(target_cfg.get("nodata", 255)),
-        )
+        if regression:
+            target_path = write_float_raster(
+                out_dir / "ml_target.tif",
+                data.target_data.target,
+                data.target_data.profile,
+            )
+        else:
+            target_path = write_uint8_raster(
+                out_dir / "ml_target.tif",
+                data.target_data.target,
+                data.target_data.profile,
+                nodata=int(target_cfg.get("nodata", 255)),
+            )
 
     return {
         "model_name": model_name,
+        "run_id": run_id,
         "output_dir": out_dir,
         "target": target_path,
-        "probability": paths["probability"],
-        "class": paths["class"],
+        "prediction": paths.get("prediction"),
+        "probability": paths.get("probability"),
+        "class": paths.get("class"),
         "model": model_path,
         "metrics": metrics_path,
         "feature_scores": scores_path,
@@ -116,11 +132,17 @@ def run_tuning_workflow(cfg: dict[str, Any], model_name: str | None = None) -> d
     }
 
 
-def _load_or_cache_dataset(cfg: dict[str, Any], out_dir: Path) -> MLData:
-    """Build the ML dataset, caching to disk so reruns skip raster I/O."""
+def _load_or_cache_dataset(cfg: dict[str, Any], cache_dir: Path) -> MLData:
+    """Build the ML dataset, caching to disk so reruns skip raster I/O.
+
+    cache_dir must be stable across runs (not the per-run timestamped output
+    dir) — dataset_cache: true exists specifically so a multi-hour tuning
+    sweep doesn't re-do raster I/O on every restart; a run-id-scoped cache
+    would never hit.
+    """
     tuning_cfg = cfg.get("ml", {}).get("tuning", {})
     use_cache = bool(tuning_cfg.get("dataset_cache", False))
-    cache_path = out_dir / "ml_dataset_cache.pkl"
+    cache_path = cache_dir / "ml_dataset_cache.pkl"
 
     if use_cache and cache_path.exists():
         print(f"[tuning] Loading cached dataset: {cache_path}")
@@ -128,7 +150,7 @@ def _load_or_cache_dataset(cfg: dict[str, Any], out_dir: Path) -> MLData:
 
     data = build_ml_dataset(cfg)
     if use_cache:
-        out_dir.mkdir(parents=True, exist_ok=True)
+        cache_dir.mkdir(parents=True, exist_ok=True)
         dump(data, cache_path)
         print(f"[tuning] Dataset cached: {cache_path}")
     return data
@@ -164,7 +186,10 @@ def _run_search(
     if method == "grid_search":
         return _sklearn_search(cfg, model, data, train_rows, cv_plan, search_space, scoring, "grid_search")
     if method == "random_search":
-        return _sklearn_search(cfg, model, data, train_rows, cv_plan, search_space, scoring, "random_search")
+        n_iter = int(tuning_cfg.get("n_iter", 40))
+        random_state = int(tuning_cfg.get("random_state", 42))
+        constrained = _build_constrained_param_list(search_space, n_iter, random_state)
+        return _sklearn_search(cfg, model, data, train_rows, cv_plan, constrained, scoring, "random_search")
     if method == "optuna":
         return _optuna_search(cfg, model, data, train_rows, cv_plan, search_space, scoring)
 
@@ -188,6 +213,27 @@ def _sklearn_search(
     y_train = data.y[train_rows]
     scorer = scorer_from_name(scoring)
     n_jobs = int(tuning_cfg.get("n_jobs", 1))
+
+    if isinstance(search_space, list):
+        # pre-built list of valid combinations (e.g. from constrained random sampling)
+        from sklearn.model_selection import GridSearchCV as _GS
+        search = _GS(
+            model,
+            param_grid=search_space,
+            scoring=scorer,
+            cv=cv_plan.splitter,
+            n_jobs=n_jobs,
+            refit=True,
+            error_score="raise",
+        )
+        search.fit(X_train, y_train, groups=cv_plan.groups)
+        return search.best_estimator_, {
+            "search_method": method,
+            "scoring": scoring,
+            "best_score": float(search.best_score_),
+            "best_params": _clean_params(search.best_params_),
+            "cv_results": pd.DataFrame(search.cv_results_),
+        }
 
     if method == "grid_search":
         search = GridSearchCV(
@@ -297,6 +343,16 @@ def scorer_from_name(name: str):
     )
 
     clean = name.lower()
+    # --- regression scorers ---
+    if clean == "r2":
+        return "r2"
+    if clean in {"neg_mean_absolute_error", "mae"}:
+        return "neg_mean_absolute_error"
+    if clean in {"neg_root_mean_squared_error", "rmse"}:
+        return "neg_root_mean_squared_error"
+    if clean in {"neg_mean_squared_error", "mse"}:
+        return "neg_mean_squared_error"
+    # --- classification scorers ---
     if clean in {"mcc", "matthews_corrcoef"}:
         return make_scorer(matthews_corrcoef)
     if clean in {"balanced_accuracy", "balanced_acc"}:
@@ -353,6 +409,29 @@ def _suggest_param(trial: Any, name: str, spec: Any) -> Any:
 
     values = spec if isinstance(spec, list) else [spec]
     return trial.suggest_categorical(name, values)
+
+
+def _build_constrained_param_list(search_space: dict, n_iter: int, random_state: int) -> list[dict]:
+    """Sample n_iter RF param combinations, enforcing: bootstrap=False → max_samples=None."""
+    from sklearn.model_selection import ParameterSampler
+    rng = np.random.RandomState(random_state)
+    has_bs = "bootstrap" in search_space
+    has_ms = "max_samples" in search_space
+    if not (has_bs and has_ms):
+        return search_space  # no constraints needed — use RandomizedSearchCV directly
+    raw = list(ParameterSampler(search_space, n_iter=n_iter * 5, random_state=rng))
+    seen, valid = set(), []
+    for p in raw:
+        if not p.get("bootstrap", True):
+            p = dict(p, max_samples=None)
+        key = tuple(sorted((k, str(v)) for k, v in p.items()))
+        if key not in seen:
+            seen.add(key)
+            valid.append(p)
+        if len(valid) >= n_iter:
+            break
+    # GridSearchCV requires each value to be a list, not a scalar
+    return [{k: [v] for k, v in p.items()} for p in valid]
 
 
 def _finite_search_size(search_space: dict[str, Any]) -> int:

@@ -7,7 +7,7 @@ import geopandas as gpd
 import numpy as np
 from rasterio.features import geometry_mask
 
-from pci_source_zones.config import resolve_path
+from pci_source_zones.config import resolve_data_path, resolve_path
 from pci_source_zones.inputs import read_raster
 
 
@@ -127,7 +127,7 @@ def _polygon_id_splits(
     split_cfg: dict[str, Any],
     poly_cfg: dict[str, Any],
 ) -> dict[str, np.ndarray]:
-    path = resolve_path(cfg, poly_cfg["path"])
+    path = resolve_data_path(cfg, poly_cfg["path"])
     id_field = str(poly_cfg.get("id_field", "poly_id"))
     gdf = gpd.read_file(path)
     if id_field not in gdf.columns:
@@ -207,7 +207,7 @@ def _aoi_raster_splits(
         path_raw = split_cfg.get(split_name)
         if path_raw is None:
             continue
-        path = resolve_path(cfg, path_raw)
+        path = resolve_data_path(cfg, path_raw)
         aoi_arr, _ = read_raster(path)
         if aoi_arr.shape != valid_mask.shape:
             raise ValueError(
@@ -237,7 +237,7 @@ def _raster_splits(
     split_cfg: dict[str, Any],
 ) -> dict[str, np.ndarray]:
     raster_cfg = split_cfg.get("raster", {})
-    split_arr, _ = read_raster(resolve_path(cfg, raster_cfg["path"]))
+    split_arr, _ = read_raster(resolve_data_path(cfg, raster_cfg["path"]))
     if split_arr.shape != valid_mask.shape:
         raise ValueError(f"Split raster shape {split_arr.shape} does not match {valid_mask.shape}.")
     values = {
@@ -260,12 +260,58 @@ def _mask_from_polygons(
 ) -> np.ndarray:
     frames = []
     for path in paths:
-        gdf = gpd.read_file(resolve_path(cfg, path))
+        gdf = gpd.read_file(resolve_data_path(cfg, path))
         if gdf.crs is not None and profile.get("crs") is not None:
             gdf = gdf.to_crs(profile["crs"])
         frames.append(gdf)
     geom = [geom for gdf in frames for geom in gdf.geometry if geom is not None and not geom.is_empty]
     return geometry_mask(geom, out_shape=shape, transform=profile["transform"], invert=True)
+
+
+def polygon_train_region_mask(
+    cfg: dict[str, Any],
+    profile: dict[str, Any],
+    shape: tuple[int, int],
+    split_cfg: dict[str, Any],
+) -> np.ndarray | None:
+    """2D mask of pixels geographically inside the train split's polygons.
+
+    Unlike make_splits()'s flat train indices, this ignores feature/target
+    validity — it only answers "is this pixel inside a train polygon". A
+    caller that wants to sample beyond flat_indices[train_rows] (e.g. UNet
+    patch sampling with use_all_pixels) can safely expand into this mask
+    without ever drawing a patch from test/val geography.
+
+    Returns None when ml.split.method isn't "polygons" — there is no
+    well-defined spatial train region to expand into for e.g. "random",
+    which scatters train/test pixels with no spatial locality, so patches
+    would straddle both regardless of masking.
+    """
+    if str(split_cfg.get("method", "random")).lower() != "polygons":
+        return None
+
+    poly_cfg = split_cfg.get("polygons", {})
+    if "path" in poly_cfg:
+        path = resolve_data_path(cfg, poly_cfg["path"])
+        id_field = str(poly_cfg.get("id_field", "poly_id"))
+        gdf = gpd.read_file(path)
+        if gdf.crs is not None and profile.get("crs") is not None:
+            gdf = gdf.to_crs(profile["crs"])
+        ids = _split_ids(poly_cfg, "train")
+        if ids is None:
+            return None
+        chosen = gdf[gdf[id_field].isin(ids)]
+        geoms = [g for g in chosen.geometry if g is not None and not g.is_empty]
+        if not geoms:
+            return None
+        return geometry_mask(geoms, out_shape=shape, transform=profile["transform"], invert=True)
+
+    paths = poly_cfg.get("train", [])
+    if isinstance(paths, (str, Path)):
+        paths = [paths]
+    if not paths:
+        return None
+    return _mask_from_polygons(cfg, paths, profile, shape)
 
 
 def _balance_training_indices(
