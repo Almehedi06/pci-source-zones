@@ -45,6 +45,8 @@ def run_ml_workflow(cfg: dict[str, Any], model_name: str | None = None) -> dict[
             "model_name": model_name,
             "feature_names": list(data.X.columns),
             "positive_rule": data.target_data.positive_rule,
+            "is_regression": is_regression,
+            "run_id": run_id,
         },
         model_path,
     )

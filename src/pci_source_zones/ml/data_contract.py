@@ -34,8 +34,13 @@ class ContractReport:
     rasters: list[RasterFingerprint] = field(default_factory=list)
 
 
-def _referenced_raster_paths(cfg: dict[str, Any]) -> dict[str, str]:
-    """Every raster path a run of this config would load, keyed by a label."""
+def _referenced_raster_paths(cfg: dict[str, Any], features_only: bool = False) -> dict[str, str]:
+    """Every raster path a run of this config would load, keyed by a label.
+
+    features_only=True restricts to the input features a trained model needs
+    — used for inference on a new fire, where no target raster, split
+    polygons, or tobit layers exist (or are needed).
+    """
     ml_cfg = cfg.get("ml", {})
     paths: dict[str, str] = {}
 
@@ -51,6 +56,9 @@ def _referenced_raster_paths(cfg: dict[str, Any]) -> dict[str, str]:
     for name, p in ml_cfg.get("feature_paths", {}).items():
         if name in selected:
             paths[f"feature_paths.{name}"] = p
+
+    if features_only:
+        return paths
 
     target_cfg = ml_cfg.get("target", {})
     if target_cfg.get("path"):
@@ -76,7 +84,11 @@ def _referenced_raster_paths(cfg: dict[str, Any]) -> dict[str, str]:
     return paths
 
 
-def validate_data_contract(cfg: dict[str, Any], tolerance: float = 1e-3) -> ContractReport:
+def validate_data_contract(
+    cfg: dict[str, Any],
+    tolerance: float = 1e-3,
+    features_only: bool = False,
+) -> ContractReport:
     """Validate every raster this config references shares one common grid.
 
     Raises ValueError listing *every* problem found (missing file, CRS
@@ -84,8 +96,11 @@ def validate_data_contract(cfg: dict[str, Any], tolerance: float = 1e-3) -> Cont
     transform) in a single consolidated message. Returns a ContractReport
     (file fingerprints) on success, reused by provenance.write_run_manifest
     so files aren't stat'd twice.
+
+    features_only=True checks only model input features — for inference on a
+    new fire, which has no target/split/tobit layers.
     """
-    referenced = _referenced_raster_paths(cfg)
+    referenced = _referenced_raster_paths(cfg, features_only=features_only)
     if not referenced:
         raise ValueError("No rasters referenced by ml.base_rasters/feature_paths — nothing to validate.")
 

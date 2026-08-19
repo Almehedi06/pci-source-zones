@@ -224,6 +224,16 @@ def run_unet_workflow(cfg: dict[str, Any]) -> dict[str, Any]:
             "positive_rule": target_data.positive_rule,
             "norm_stats": norm_stats,
             "tobit_mode": tobit_mode,
+            "is_regression": is_regression,
+            "run_id": run_id,
+            # Sliding-window geometry is part of the model's identity: the same
+            # weights produce different outputs under a different patch_size /
+            # overlap, so inference must reuse these rather than whatever config
+            # it happens to be handed.
+            "inference_cfg": {
+                "patch_size": int(unet_cfg.get("patch_size", 128)),
+                "overlap": float(unet_cfg.get("overlap", 0.5)),
+            },
         },
         weights_path,
     )

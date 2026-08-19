@@ -15,5 +15,10 @@ from .data_contract import ContractReport, validate_data_contract
 
 def run_preflight(cfg: dict[str, Any]) -> tuple[dict[str, Any], ContractReport]:
     cfg = validate_ml_config(cfg)
+    if not cfg.get("ml", {}).get("target"):
+        raise ValueError(
+            "Training requires an ml.target section (type, and path or threshold rule). "
+            "Configs without a target are inference-only — use scripts/13_predict.py."
+        )
     report = validate_data_contract(cfg)
     return cfg, report

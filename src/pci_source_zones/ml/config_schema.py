@@ -202,7 +202,10 @@ class MLConfig(BaseModel):
     output_subdir: str = "source_area_workflow/ml/{model}"
     base_rasters: dict[str, str] = Field(default_factory=dict)
     feature_paths: dict[str, str] = Field(default_factory=dict)
-    target: TargetConfig = Field(default_factory=TargetConfig)
+    # Optional at schema level so the same schema validates inference configs,
+    # which have no target (a new fire has no labels). Training requires it —
+    # enforced by preflight.run_preflight(), not here.
+    target: TargetConfig | None = None
     features: FeaturesConfig
     split: SplitConfig = Field(default_factory=SplitConfig)
     model: ModelConfig = Field(default_factory=ModelConfig)
