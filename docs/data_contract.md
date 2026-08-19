@@ -31,6 +31,21 @@ neighbouring pixels are strongly autocorrelated and a random split would leak:
 The test polygons are never touched by either mechanism — they are for the final
 evaluation only.
 
+## Hyperparameter tuning
+
+| Models | Entry point | Search | CV |
+|---|---|---|---|
+| RF / LR / XGBoost | `scripts/08_tune_ml.py` | grid / random / optuna (`tuning.py`) | `polygon_groups`, `spatial_blocks`, k-fold |
+| UNet | `scripts/14_tune_unet.py` | grid / random (`unet_tuning.py`) | leave-one-polygon-out |
+
+The UNet tuner deliberately uses an explicit grid rather than a Bayesian optimiser: a
+trial costs minutes on a GPU, and only a few hyperparameters matter at this data size.
+Raster I/O and the patch pixel mask are computed once and reused across all trials;
+only the patch datasets and the model are rebuilt per trial. `ml.tuning.max_epochs`
+caps epochs during the sweep — retrain the winner uncapped with `scripts/09_run_unet.py`
+using the emitted `unet_best.yaml`. Cost scales as `n_trials x cv.n_splits`, so rank
+cheaply with `n_splits: 1` and re-run the shortlist with more folds.
+
 ## How paths resolve
 
 All relative filenames in the config are resolved against `paths.data_dir`.

@@ -1,0 +1,100 @@
+site: montecito
+
+# UNet hyperparameter search on p_obs_union (the strongest target).
+# Selection metric: mean val_loss over leave-one-polygon-out folds.
+# The test polygons [7, 8] are never touched here — they are for the final
+# evaluation of the winning config only.
+
+paths:
+  output_dir: /home/abdullah/ml_output
+  data_dir: /mnt/c/Users/amehedi/Downloads/thomas/aligned
+
+ml:
+  output_subdir: source_area_workflow/ml/{model}
+
+  base_rasters:
+    slope:         slope_aligned.tif
+    specific_area: drainage_area_aligned.tif
+
+  target:
+    type: raster_continuous
+    path: p_obs_union_aligned.tif
+    export: false
+
+  feature_paths:
+    G:             /mnt/c/Users/amehedi/Downloads/G_topographic_driving_index.tif
+    curvature:     curvature_aligned.tif
+    aspect:        aspect_aligned.tif
+    elevation:     elevation_aligned.tif
+    et_diff:       et_diff_aligned.tif
+    ndvi_diff:     ndvi_diff_aligned.tif
+    soil_thickness: soil_thickness_aligned.tif
+    sand_total:    sand_total_aligned.tif
+    silt_total:    silt_total_aligned.tif
+    ksat:          ksat_aligned.tif
+    ph:            ph_aligned.tif
+    precip_jan9:   precip_jan9_aligned.tif
+
+  features:
+    numeric:
+      - G
+      - slope
+      - drainage_area
+      - curvature
+      - aspect
+      - elevation
+      - et_diff
+      - ndvi_diff
+      - soil_thickness
+      - sand_total
+      - silt_total
+      - ksat
+      - ph
+      - precip_jan9
+    categorical: []
+
+  split:
+    method: polygons
+    polygons:
+      path:      /mnt/c/Users/amehedi/Downloads/train_test_poly1.gpkg
+      id_field:  id
+      train_ids: [1, 2, 3, 4, 5, 6]
+      test_ids:  [7, 8]
+    val_size: 0.1
+
+  model:
+    type: unet
+    attention: true
+    tobit: false
+
+  unet:
+    batch_size: 16
+    epochs: 1000
+    learning_rate: 0.001
+    early_stopping_patience: 30
+    use_all_pixels: true
+    num_workers: 0
+    device: auto
+
+  tuning:
+    search_method: grid_search    # grid_search | random_search
+    # n_iter: 8                   # only used by random_search
+
+    # Cap epochs during the sweep to keep trials cheap; the winning config is
+    # then retrained without the cap via scripts/09_run_unet.py.
+    max_epochs: 150
+
+    cv:
+      # 1 = rank cheaply on a single held-out polygon. Raise to 3-6 for a
+      # full leave-one-polygon-out estimate on the shortlisted configs
+      # (cost scales linearly: n_trials x n_splits trainings).
+      n_splits: 1
+      # val_polygon_ids: [2]      # pin specific polygons instead of the first n
+
+    # Only the hyperparameters that matter at this data size. patch_size and
+    # overlap are the real levers: after the leakage fix, patch count dropped
+    # to ~163, so geometry controls how much training signal exists at all.
+    search_space:
+      patch_size:   [64, 128]
+      overlap:      [0.5, 0.75]
+      base_filters: [16, 32]

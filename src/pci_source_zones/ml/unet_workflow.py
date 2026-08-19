@@ -111,43 +111,9 @@ def run_unet_workflow(cfg: dict[str, Any]) -> dict[str, Any]:
     # to the train-polygon footprint first; only fall back to the strictly
     # valid train indices when the split method has no spatial train region
     # to restrict to (e.g. "random", which has no spatial locality at all).
-    use_all_pixels = bool(unet_cfg.get("use_all_pixels", False))
-    train_region_2d: np.ndarray | None = None
-    if tobit_mode or use_all_pixels:
-        train_region_2d = polygon_train_region_mask(
-            cfg, target_data.profile, shape, cfg.get("ml", {}).get("split", {})
-        )
-
-    if tobit_mode and censored_arr is not None:
-        # Tobit: sample patches from all hillslope pixels — observed (C_eff finite) + censored
-        obs_mask      = target_data.valid_mask  # True where C_eff is observed
-        censored_bool = np.nan_to_num(censored_arr, nan=0.0) > 0.5
-        train_mask_2d = obs_mask | censored_bool
-        if train_region_2d is not None:
-            train_mask_2d &= train_region_2d
-        else:
-            train_mask_2d &= _pixels_in(data.flat_indices[train_rows], shape)
-            print("[unet/tobit] no spatial train region for this split method — "
-                  "restricting to train-split pixels only to avoid leakage.")
-        patch_indices = np.flatnonzero(train_mask_2d.ravel())
-        print(f"[unet/tobit] {len(patch_indices):,} pixels for patches "
-              f"(obs: {(obs_mask & train_mask_2d).sum():,}, "
-              f"censored: {(censored_bool & train_mask_2d).sum():,})")
-    elif use_all_pixels:
-        if train_region_2d is not None:
-            train_mask_2d = target_data.valid_mask & train_region_2d
-            print(f"[unet] use_all_pixels=True — using {train_mask_2d.sum():,} valid pixels "
-                  f"within the train-polygon region for patches")
-        else:
-            train_mask_2d = _pixels_in(data.flat_indices[train_rows], shape)
-            print(f"[unet] use_all_pixels=True requested but ml.split.method="
-                  f"{cfg.get('ml', {}).get('split', {}).get('method')!r} has no spatial train "
-                  f"region — falling back to train-split pixels only ({train_mask_2d.sum():,}) "
-                  f"to avoid test/val leakage.")
-        patch_indices = np.flatnonzero(train_mask_2d.ravel())
-    else:
-        train_mask_2d = _pixels_in(data.flat_indices[train_rows], shape)
-        patch_indices = data.flat_indices[train_rows]
+    train_mask_2d, patch_indices = select_patch_pixels(
+        cfg, target_data, data, shape, tobit_mode, censored_arr
+    )
 
     norm_stats_path = out_dir / "unet_norm_stats.json"
     if bool(unet_cfg.get("load_norm_stats", False)) and norm_stats_path.exists():
@@ -354,6 +320,76 @@ def _pixels_in(flat_indices: np.ndarray, shape: tuple[int, int]) -> np.ndarray:
     mask = np.zeros(shape, dtype=bool)
     mask.ravel()[flat_indices] = True
     return mask
+
+
+def select_patch_pixels(
+    cfg: dict[str, Any],
+    target_data: Any,
+    data: Any,
+    shape: tuple[int, int],
+    tobit_mode: bool,
+    censored_arr: np.ndarray | None,
+    verbose: bool = True,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Choose which pixels patches may be drawn from, and the mask they span.
+
+    use_all_pixels / tobit both want to sample patches from every target-valid
+    pixel, not just flat_indices[train_rows] (useful for a sparsely-valid
+    target like C_eff, where requiring full feature completeness discards a
+    lot of otherwise-usable pixels). But target_data.valid_mask alone has no
+    idea which pixels sit inside the train polygons vs the held-out test/val
+    polygons — using it directly lets patches (and the norm-stats computed
+    from them) draw straight from test geography, leaking test labels into
+    training gradients. Restrict to the train-polygon footprint first; only
+    fall back to the strictly valid train indices when the split method has no
+    spatial train region to restrict to (e.g. "random").
+
+    Shared by the training workflow and the HP tuner so both sample patches
+    from exactly the same pixels.
+    """
+    unet_cfg = cfg.get("ml", {}).get("unet", {}) or {}
+    train_rows = data.splits["train"]
+    use_all_pixels = bool(unet_cfg.get("use_all_pixels", False))
+
+    def log(msg: str) -> None:
+        if verbose:
+            print(msg)
+
+    train_region_2d: np.ndarray | None = None
+    if tobit_mode or use_all_pixels:
+        train_region_2d = polygon_train_region_mask(
+            cfg, target_data.profile, shape, cfg.get("ml", {}).get("split", {})
+        )
+
+    if tobit_mode and censored_arr is not None:
+        obs_mask = target_data.valid_mask  # True where C_eff is observed
+        censored_bool = np.nan_to_num(censored_arr, nan=0.0) > 0.5
+        train_mask_2d = obs_mask | censored_bool
+        if train_region_2d is not None:
+            train_mask_2d &= train_region_2d
+        else:
+            train_mask_2d &= _pixels_in(data.flat_indices[train_rows], shape)
+            log("[unet/tobit] no spatial train region for this split method — "
+                "restricting to train-split pixels only to avoid leakage.")
+        log(f"[unet/tobit] {int(train_mask_2d.sum()):,} pixels for patches "
+            f"(obs: {(obs_mask & train_mask_2d).sum():,}, "
+            f"censored: {(censored_bool & train_mask_2d).sum():,})")
+    elif use_all_pixels:
+        if train_region_2d is not None:
+            train_mask_2d = target_data.valid_mask & train_region_2d
+            log(f"[unet] use_all_pixels=True — using {train_mask_2d.sum():,} valid pixels "
+                f"within the train-polygon region for patches")
+        else:
+            train_mask_2d = _pixels_in(data.flat_indices[train_rows], shape)
+            log(f"[unet] use_all_pixels=True requested but ml.split.method="
+                f"{cfg.get('ml', {}).get('split', {}).get('method')!r} has no spatial train "
+                f"region — falling back to train-split pixels only ({train_mask_2d.sum():,}) "
+                f"to avoid test/val leakage.")
+    else:
+        train_mask_2d = _pixels_in(data.flat_indices[train_rows], shape)
+        return train_mask_2d, data.flat_indices[train_rows]
+
+    return train_mask_2d, np.flatnonzero(train_mask_2d.ravel())
 
 
 def _train_val_patch_indices(

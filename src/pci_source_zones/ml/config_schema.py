@@ -155,6 +155,9 @@ class TuningConfig(BaseModel):
     n_jobs: int = 1
     include_validation_in_tuning: bool = False
     dataset_cache: bool = False
+    # UNet sweeps only: cap epochs per trial so a sweep stays affordable; the
+    # winning config is retrained uncapped.
+    max_epochs: int | None = None
     cv: dict[str, Any] = Field(default_factory=dict)
     # Hyperparameter names/shapes are model-specific and open-ended by design —
     # not schema-checked beyond "it's a mapping".
