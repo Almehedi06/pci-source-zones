@@ -1,69 +1,74 @@
 site: montecito
 
 paths:
-  output_dir: /mnt/c/Users/amehedi/Downloads
+  output_dir: /home/abdullah/ml_output
+  # Relative feature/target filenames resolve against this directory.
+  # Override at runtime: python scripts/07_run_ml.py --data-dir /path/to/event/aligned
+  data_dir: /mnt/c/Users/amehedi/Downloads/thomas/aligned
 
 ml:
   output_subdir: source_area_workflow/ml/{model}
 
   base_rasters:
-    slope: /mnt/c/Users/amehedi/Downloads/thomas/aligned/slope_aligned.tif
-    specific_area: /mnt/c/Users/amehedi/Downloads/thomas/aligned/drainage_area_aligned.tif
+    slope:         slope_aligned.tif
+    specific_area: drainage_area_aligned.tif
     # g and dem_diff not needed for raster_continuous target
-    # g: /mnt/c/Users/amehedi/Downloads/thomas/G_from_topographic_elevation.tif
-    # dem_diff: /mnt/c/Users/amehedi/Downloads/thomas/dem_diff.tif
+    # g: G_aligned.tif
+    # dem_diff: dem_diff_aligned.tif
 
   target:
     type: raster_continuous
-    path: /mnt/c/Users/amehedi/Downloads/thomas/aligned/target_src_hi_aligned.tif
+    path: p_obs_inter_aligned.tif
     export: true
-    # --- classification target (re-enable to switch back) ---
-    # type: physics_dod
-    # c_min: 5
-    # c_channel: 120
-    # erosion_threshold_m: -0.55
-    # exclude_channels_from_training: true
-    # nodata: 255
 
   feature_paths:
-    curvature:           /mnt/c/Users/amehedi/Downloads/thomas/aligned/curvature_aligned.tif
-    aspect:              /mnt/c/Users/amehedi/Downloads/thomas/aligned/aspect_aligned.tif
-    elevation:           /mnt/c/Users/amehedi/Downloads/thomas/aligned/elevation_aligned.tif
-    burn_severity:       /mnt/c/Users/amehedi/Downloads/thomas/aligned/burn_severity_aligned.tif
-    et_diff:             /mnt/c/Users/amehedi/Downloads/thomas/aligned/et_diff_aligned.tif
-    ndvi_diff:           /mnt/c/Users/amehedi/Downloads/thomas/aligned/ndvi_diff_aligned.tif
-    soil_thickness:      /mnt/c/Users/amehedi/Downloads/thomas/aligned/soil_thickness_aligned.tif
-    sand_total:          /mnt/c/Users/amehedi/Downloads/thomas/aligned/sand_total_aligned.tif
-    silt_total:          /mnt/c/Users/amehedi/Downloads/thomas/aligned/silt_total_aligned.tif
-    clay_total:          /mnt/c/Users/amehedi/Downloads/thomas/aligned/clay_total_aligned.tif
-    porosity:            /mnt/c/Users/amehedi/Downloads/thomas/aligned/porosity_aligned.tif
-    ksat:                /mnt/c/Users/amehedi/Downloads/thomas/aligned/ksat_aligned.tif
-    ph:                  /mnt/c/Users/amehedi/Downloads/thomas/aligned/ph_aligned.tif
-    field_capacity:      /mnt/c/Users/amehedi/Downloads/thomas/aligned/field_capacity_aligned.tif
-    landcover:           /mnt/c/Users/amehedi/Downloads/thomas/aligned/landcover_aligned.tif
+    # G is outside the aligned folder — keep as absolute until moved into data_dir for new events
+    G:             /mnt/c/Users/amehedi/Downloads/G_topographic_driving_index.tif
+    curvature:     curvature_aligned.tif
+    aspect:        aspect_aligned.tif
+    elevation:     elevation_aligned.tif
+    burn_severity: burn_severity_aligned.tif
+    dnbr:          dnbr_aligned.tif
+    et_diff:       et_diff_aligned.tif
+    ndvi_diff:     ndvi_diff_aligned.tif
+    soil_thickness: soil_thickness_aligned.tif
+    sand_total:    sand_total_aligned.tif
+    silt_total:    silt_total_aligned.tif
+    clay_total:    clay_total_aligned.tif
+    porosity:      porosity_aligned.tif
+    ksat:          ksat_aligned.tif
+    ph:            ph_aligned.tif
+    field_capacity: field_capacity_aligned.tif
+    landcover:     landcover_aligned.tif
+    # Evidence features from 1m aggregation — outside aligned folder, keep absolute
     frac_sig_erosion:    /mnt/c/Users/amehedi/Downloads/dDEM_10m_evidence_from_1m/frac_sig_erosion_10m.tif
     frac_sig_deposition: /mnt/c/Users/amehedi/Downloads/dDEM_10m_evidence_from_1m/frac_sig_deposition_10m.tif
     std_DoD:             /mnt/c/Users/amehedi/Downloads/dDEM_10m_evidence_from_1m/std_DoD_10m.tif
     frac_dG_positive:    /mnt/c/Users/amehedi/Downloads/DeltaG_10m_from_1m/frac_DeltaG_positive_10m_from_1m.tif
+    precip_jan9:   precip_jan9_aligned.tif
+    precip_jan10:  precip_jan10_aligned.tif
 
   features:
     numeric:
+      - G
       - slope
       - drainage_area
       - curvature
       - aspect
       - elevation
-      - burn_severity
+      # - burn_severity      # zero importance
       - et_diff
       - ndvi_diff
       - soil_thickness
       - sand_total
       - silt_total
-      - clay_total
-      - porosity
+      # - clay_total         # near-zero, collinear with sand+silt
+      # - porosity           # zero importance, only 4 discrete values
       - ksat
       - ph
-      - field_capacity
+      # - field_capacity     # zero importance, only 4 discrete values
+      - precip_jan9
+      # - precip_jan10       # r=1.00 with precip_jan9, redundant
       # --- evidence features (comment out to avoid leakage) ---
       # - frac_sig_erosion
       # - frac_sig_deposition
@@ -73,26 +78,24 @@ ml:
       # - landcover
 
   split:
-    method: random
-    seed: 42
-    test_size: 0.2
-    val_size: 0.1
-    # negative_to_positive_ratio: 3   # classification only
-    # --- spatial split (re-enable for production) ---
-    # method: polygons
-    # polygons:
-    #   path: /mnt/c/Users/amehedi/Downloads/dunne_lithology_polygons_unlabeled.gpkg
-    #   id_field: poly_id
-    #   train_ids: [3]
-    #   test_ids: [4]
+    method: polygons
+    polygons:
+      # Polygon file is outside the aligned folder — keep absolute or copy to data_dir for new events
+      path:      /mnt/c/Users/amehedi/Downloads/train_test_poly1.gpkg
+      id_field:  id
+      train_ids: [1, 2, 3, 4, 5, 6]
+      test_ids:  [7, 8]
+    val_size: 0.1         # carved from train set randomly
 
   model:
     type: random_forest_regressor
-    n_estimators: 100
-    max_depth: null
-    min_samples_split: 2
-    min_samples_leaf: 1
-    max_features: sqrt
+    n_estimators: 150
+    max_depth: 15
+    min_samples_leaf: 20
+    max_features: 0.2
+    max_samples: 0.8
+    bootstrap: true
+    criterion: squared_error
     random_state: 42
     n_jobs: -1
 

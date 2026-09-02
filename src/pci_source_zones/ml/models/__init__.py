@@ -4,7 +4,7 @@ from typing import Any
 
 from .logistic_regression import build_logistic_regression
 from .random_forest import build_random_forest, build_random_forest_regressor
-from .xgboost import build_xgboost
+from .xgboost import build_xgboost, build_xgboost_regressor
 
 
 def model_name_from_config(cfg: dict[str, Any], override: str | None = None) -> str:
@@ -26,6 +26,8 @@ def normalize_model_name(name: str) -> str:
         "lr": "logistic_regression",
         "xgb": "xgboost",
         "xgboost_classifier": "xgboost",
+        "xgbr": "xgboost_regressor",
+        "xgb_regressor": "xgboost_regressor",
     }
     return aliases.get(clean, clean)
 
@@ -45,5 +47,7 @@ def build_model(model_name: str, cfg: dict[str, Any], numeric: list[str], catego
         return build_logistic_regression(model_cfg, seed, numeric, categorical)
     if model_name == "xgboost":
         return build_xgboost(model_cfg, seed)
+    if model_name == "xgboost_regressor":
+        return build_xgboost_regressor(model_cfg, seed)
 
     raise ValueError(f"Unsupported ML model: {model_name!r}")

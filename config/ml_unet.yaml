@@ -1,16 +1,17 @@
 site: montecito
 
 paths:
-  output_dir: /mnt/c/Users/amehedi/Downloads
+  output_dir: /home/abdullah/ml_output
+  data_dir: /mnt/c/Users/amehedi/Downloads/thomas/aligned
 
 ml:
   output_subdir: source_area_workflow/ml/{model}
 
   base_rasters:
-    slope: /mnt/c/Users/amehedi/Downloads/thomas/aligned/slope_aligned.tif
-    specific_area: /mnt/c/Users/amehedi/Downloads/thomas/aligned/drainage_area_aligned.tif
-    g: /mnt/c/Users/amehedi/Downloads/G_topographic_driving_index.tif
-    dem_diff: /mnt/c/Users/amehedi/Downloads/thomas/dem_diff.tif
+    slope:         slope_aligned.tif
+    specific_area: drainage_area_aligned.tif
+    g:             /mnt/c/Users/amehedi/Downloads/G_topographic_driving_index.tif  # outside data_dir
+    dem_diff:      /mnt/c/Users/amehedi/Downloads/thomas/dem_diff.tif               # outside data_dir
 
   target:
     # ── OPTION 1: physics_dod classification (G + DoD thresholds) ──────────
@@ -33,21 +34,23 @@ ml:
     # export: true
 
   feature_paths:
-    curvature:           /mnt/c/Users/amehedi/Downloads/thomas/aligned/curvature_aligned.tif
-    aspect:              /mnt/c/Users/amehedi/Downloads/thomas/aligned/aspect_aligned.tif
-    elevation:           /mnt/c/Users/amehedi/Downloads/thomas/aligned/elevation_aligned.tif
-    burn_severity:       /mnt/c/Users/amehedi/Downloads/thomas/aligned/burn_severity_aligned.tif
-    et_diff:             /mnt/c/Users/amehedi/Downloads/thomas/aligned/et_diff_aligned.tif
-    ndvi_diff:           /mnt/c/Users/amehedi/Downloads/thomas/aligned/ndvi_diff_aligned.tif
-    soil_thickness:      /mnt/c/Users/amehedi/Downloads/thomas/aligned/soil_thickness_aligned.tif
-    sand_total:          /mnt/c/Users/amehedi/Downloads/thomas/aligned/sand_total_aligned.tif
-    silt_total:          /mnt/c/Users/amehedi/Downloads/thomas/aligned/silt_total_aligned.tif
-    clay_total:          /mnt/c/Users/amehedi/Downloads/thomas/aligned/clay_total_aligned.tif
-    porosity:            /mnt/c/Users/amehedi/Downloads/thomas/aligned/porosity_aligned.tif
-    ksat:                /mnt/c/Users/amehedi/Downloads/thomas/aligned/ksat_aligned.tif
-    ph:                  /mnt/c/Users/amehedi/Downloads/thomas/aligned/ph_aligned.tif
-    field_capacity:      /mnt/c/Users/amehedi/Downloads/thomas/aligned/field_capacity_aligned.tif
-    landcover:           /mnt/c/Users/amehedi/Downloads/thomas/aligned/landcover_aligned.tif
+    curvature:     curvature_aligned.tif
+    aspect:        aspect_aligned.tif
+    elevation:     elevation_aligned.tif
+    burn_severity: burn_severity_aligned.tif
+    dnbr:          dnbr_aligned.tif
+    et_diff:       et_diff_aligned.tif
+    ndvi_diff:     ndvi_diff_aligned.tif
+    soil_thickness: soil_thickness_aligned.tif
+    sand_total:    sand_total_aligned.tif
+    silt_total:    silt_total_aligned.tif
+    clay_total:    clay_total_aligned.tif
+    porosity:      porosity_aligned.tif
+    ksat:          ksat_aligned.tif
+    ph:            ph_aligned.tif
+    field_capacity: field_capacity_aligned.tif
+    landcover:     landcover_aligned.tif
+    # Evidence features — outside data_dir, keep absolute
     frac_sig_erosion:    /mnt/c/Users/amehedi/Downloads/dDEM_10m_evidence_from_1m/frac_sig_erosion_10m.tif
     frac_sig_deposition: /mnt/c/Users/amehedi/Downloads/dDEM_10m_evidence_from_1m/frac_sig_deposition_10m.tif
     std_DoD:             /mnt/c/Users/amehedi/Downloads/dDEM_10m_evidence_from_1m/std_DoD_10m.tif

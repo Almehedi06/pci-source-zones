@@ -1,0 +1,16 @@
+# Batch dG/dC config for scripts/batch_terrain_deltas.py
+# Eagle Creek NonDensFilt 2018-2021: many independent pre/post DEM chunks
+# (per-analysis-area, not a tile grid), matched by numeric ID.
+
+pre_dir:     "/mnt/c/Users/amehedi/Downloads/eagle_creek/NonDensFilt/2018_2021/Final Pre"
+post_dir:    "/mnt/c/Users/amehedi/Downloads/eagle_creek/NonDensFilt/2018_2021/Final Post"
+output_root: "/mnt/c/Users/amehedi/Downloads/eagle_creek/18-21_dG_dC"
+
+alpha: 1.167
+
+# Default already matches "<id>_Pre.tif" / "<id>_Post.tif" -- listed
+# explicitly so it's easy to copy this file for a site with different
+# chunk-naming conventions.
+id_pattern:
+  pre:  "^(\\d+)_Pre\\.tif$"
+  post: "^(\\d+)_Post\\.tif$"

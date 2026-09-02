@@ -17,6 +17,7 @@ ml:
     aspect: aspect_aligned.tif
     elevation: elevation_aligned.tif
     burn_severity: burn_severity_aligned.tif
+    dnbr: dnbr_aligned.tif
     et_diff: et_diff_aligned.tif
     ndvi_diff: ndvi_diff_aligned.tif
     soil_thickness: soil_thickness_aligned.tif
@@ -42,6 +43,7 @@ ml:
     - curvature
     - aspect
     - elevation
+    - dnbr
     - et_diff
     - ndvi_diff
     - soil_thickness

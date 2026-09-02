@@ -1,3 +1,6 @@
+# LEGACY — original Monte Carlo / physics pipeline config (pre-ML era).
+# Not used in the active ML pipeline. Kept for reference only.
+# For the evidence/p_obs pipeline, see source_zones.yaml instead.
 site: montecito
 
 paths:

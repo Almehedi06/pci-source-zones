@@ -33,15 +33,58 @@ def bce_dice_loss(pred, target, valid_mask, pos_weight: float = 3.0):
 
     return 0.5 * bce + 0.5 * dice
 
-def weighted_mse_loss(pred, target, valid_mask, high_weight: float = 10.0, threshold: float = 0.05):
+def mse_loss(pred, target, valid_mask):
     import torch
     p = pred.squeeze(1)
     p_valid = p[valid_mask]
     t_valid = target[valid_mask]
-    weight = torch.where(t_valid > threshold,
-                         torch.tensor(high_weight, device=p.device, dtype=torch.float32),
-                         torch.ones_like(t_valid))
-    return (weight * (p_valid - t_valid) ** 2).mean()
+    return ((p_valid - t_valid) ** 2).mean()
+
+
+def tobit_loss(pred, target, valid_obs, censored, logC_bound, sigma_frozen: bool = False, censored_weight: float = 1.0):
+    """Heteroscedastic Tobit loss for left-censored regression.
+
+    pred      : (B, 2, H, W) — channel 0 = mu, channel 1 = log_sigma
+    target    : (B, H, W)    — logC_eff; zeroed where nodata (use valid_obs mask)
+    valid_obs : (B, H, W) bool — True where p_obs > 0 (C_eff observed)
+    censored  : (B, H, W) float32 — 1 where p_obs = 0 AND hillslope (censored)
+    logC_bound: (B, H, W) float32 — lower bound for censored cells (0 elsewhere)
+    sigma_frozen: if True, treat sigma = 1 (warm-start; sigma head gets no gradient)
+    """
+    import torch
+
+    mu      = pred[:, 0]        # (B, H, W)
+    log_sig = pred[:, 1]        # (B, H, W)
+
+    if sigma_frozen:
+        sigma = torch.ones_like(mu)
+    else:
+        sigma = torch.exp(log_sig.clamp(-3, 2))
+
+    eps = 1e-8
+
+    # Observed NLL — Gaussian negative log-likelihood
+    z_obs = (target - mu) / (sigma + eps)
+    nll_obs = 0.5 * z_obs ** 2 + torch.log(sigma + eps)
+    n_obs = valid_obs.float().sum() + eps
+    loss_obs = (nll_obs * valid_obs.float()).sum() / n_obs
+
+    # Censored NLL — survival function: -log P(C > C_bound | mu, sigma)
+    # = -log(1 - Phi(z_cen)) = -log(Phi(-z_cen))
+    cen_mask = (censored > 0.5) & (logC_bound > 0.0)
+    loss_cen = torch.tensor(0.0, device=mu.device, dtype=mu.dtype)
+    if cen_mask.any():
+        z_cen = (logC_bound - mu) / (sigma + eps)
+        try:
+            log_surv = torch.special.log_ndtr(-z_cen)   # log(Phi(-z_cen)), numerically stable
+        except AttributeError:
+            import math
+            log_surv = torch.log(0.5 * torch.erfc(z_cen / math.sqrt(2)) + eps)
+        nll_cen = -log_surv
+        n_cen = cen_mask.float().sum() + eps
+        loss_cen = (nll_cen * cen_mask.float()).sum() / n_cen
+
+    return loss_obs + censored_weight * loss_cen
 
 
 def train_unet(
@@ -51,6 +94,7 @@ def train_unet(
     cfg: dict[str, Any],
     out_dir: Path,
     is_regression: bool = False,
+    tobit_mode: bool = False,
 ) -> tuple[Any, list[dict[str, Any]]]:
     """Train UNet with BCE+Dice loss and early stopping.
 
@@ -70,6 +114,9 @@ def train_unet(
     patience = int(unet_cfg.get("early_stopping_patience", 10))
     pos_weight = float(unet_cfg.get("pos_weight", 3.0))
     num_workers = int(unet_cfg.get("num_workers", 0))
+    warm_start_epochs = int(unet_cfg.get("warm_start_epochs", 5)) if tobit_mode else 0
+    fixed_sigma = bool(unet_cfg.get("fixed_sigma", False))
+    censored_weight = float(unet_cfg.get("censored_weight", 1.0))
     device = _get_device(unet_cfg)
 
     model = model.to(device)
@@ -99,12 +146,18 @@ def train_unet(
     best_weights_path = out_dir / "unet_best_weights.pt"
     history: list[dict[str, Any]] = []
 
+    loss_name = "tobit" if tobit_mode else ("mse" if is_regression else "bce+dice")
     print(f"Training UNet on {device} | {len(train_dataset)} train patches, {len(val_dataset)} val patches")
-    print(f"  loss: {'weighted_mse' if is_regression else 'bce+dice'}")
+    print(f"  loss: {loss_name}" + (f"  warm_start: {warm_start_epochs} epochs" if tobit_mode else ""))
 
     for epoch in range(1, epochs + 1):
-        train_loss = _run_epoch(model, train_loader, device, pos_weight, optimizer, training=True, is_regression=is_regression)
-        val_loss = _run_epoch(model, val_loader, device, pos_weight, training=False, is_regression=is_regression)
+        sigma_frozen = fixed_sigma or (tobit_mode and epoch <= warm_start_epochs)
+        train_loss = _run_epoch(model, train_loader, device, pos_weight, optimizer, training=True,
+                                is_regression=is_regression, tobit_mode=tobit_mode,
+                                sigma_frozen=sigma_frozen, censored_weight=censored_weight)
+        val_loss = _run_epoch(model, val_loader, device, pos_weight, training=False,
+                              is_regression=is_regression, tobit_mode=tobit_mode,
+                              sigma_frozen=sigma_frozen, censored_weight=censored_weight)
         scheduler.step(val_loss)
 
         lr_now = optimizer.param_groups[0]["lr"]
@@ -143,6 +196,9 @@ def _run_epoch(
     optimizer: Any = None,
     training: bool = True,
     is_regression: bool = False,
+    tobit_mode: bool = False,
+    sigma_frozen: bool = False,
+    censored_weight: float = 1.0,
 ) -> float:
     import torch
 
@@ -152,16 +208,27 @@ def _run_epoch(
 
     ctx = torch.enable_grad() if training else torch.no_grad()
     with ctx:
-        for x, y, valid in loader:
-            x = x.to(device)
-            y = y.to(device)
-            valid = valid.to(device)
-
-            pred = model(x)
-            if is_regression:
-                loss = weighted_mse_loss(pred, y, valid)
+        for batch in loader:
+            if tobit_mode:
+                x, y, valid, censored, logC_bound = batch
+                x          = x.to(device)
+                y          = y.to(device)
+                valid      = valid.to(device)
+                censored   = censored.to(device)
+                logC_bound = logC_bound.to(device)
+                pred = model(x)
+                loss = tobit_loss(pred, y, valid, censored, logC_bound,
+                                  sigma_frozen=sigma_frozen, censored_weight=censored_weight)
             else:
-                loss = bce_dice_loss(pred, y, valid, pos_weight)
+                x, y, valid = batch
+                x     = x.to(device)
+                y     = y.to(device)
+                valid = valid.to(device)
+                pred = model(x)
+                if is_regression:
+                    loss = mse_loss(pred, y, valid)
+                else:
+                    loss = bce_dice_loss(pred, y, valid, pos_weight)
 
             if training:
                 optimizer.zero_grad()

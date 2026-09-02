@@ -1,3 +1,6 @@
+# LEGACY — pre-alignment era (feature filenames differ from current data_contract.md)
+# Not used in the active pipeline. Kept for reference only.
+# For a new event, use ml_random_forest.yaml or ml_xgboost.yaml as the starting point.
 site: montecito
 
 paths:

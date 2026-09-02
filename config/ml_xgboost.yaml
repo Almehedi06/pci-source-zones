@@ -1,22 +1,13 @@
 site: montecito
 
-# Attention UNet regression on p_obs_union — the strongest target found so far
-# (full 541K-pixel spatial coverage, no truncation, unlike C_eff targets).
-# Cloned from ml_unet_regression.yaml with target/tobit swapped after fixing
-# the use_all_pixels/tobit train-region leakage bug in unet_workflow.py —
-# this is the first honest (post-fix) run of this architecture on this target.
-
 paths:
   output_dir: /home/abdullah/ml_output
   # Relative feature/target filenames resolve against this directory.
-  # Override at runtime: python scripts/09_run_unet.py --data-dir /path/to/event/aligned
+  # Override at runtime: python scripts/07_run_ml.py --data-dir /path/to/event/aligned
   data_dir: /mnt/c/Users/amehedi/Downloads/thomas/aligned
 
 ml:
-  # Distinct output dir from ml_unet_regression.yaml's C_eff/tobit run —
-  # run_unet_workflow() always names the model "unet", so without this
-  # override both configs would silently overwrite the same directory.
-  output_subdir: source_area_workflow/ml/unet_p_obs_union
+  output_subdir: source_area_workflow/ml/{model}
 
   base_rasters:
     slope:         slope_aligned.tif
@@ -24,7 +15,7 @@ ml:
 
   target:
     type: raster_continuous
-    path: p_obs_union_aligned.tif
+    path: p_obs_inter_aligned.tif
     export: true
 
   feature_paths:
@@ -56,15 +47,19 @@ ml:
       - curvature
       - aspect
       - elevation
-      - dnbr
+      # - burn_severity      # zero importance
       - et_diff
       - ndvi_diff
       - soil_thickness
       - sand_total
       - silt_total
+      # - clay_total         # near-zero, collinear with sand+silt
+      # - porosity           # zero importance, only 4 discrete values
       - ksat
       - ph
+      # - field_capacity     # zero importance, only 4 discrete values
       - precip_jan9
+      # - precip_jan10       # r=1.00 with precip_jan9, redundant
     categorical: []
 
   split:
@@ -78,24 +73,18 @@ ml:
     val_size: 0.1
 
   model:
-    type: unet
-    base_filters: 16
-    depth: 3
-    dropout: 0.2
-    attention: true
-    tobit: false
-
-  unet:
-    patch_size: 128
-    overlap: 0.75
-    batch_size: 16
-    epochs: 1000
-    learning_rate: 0.001
-    early_stopping_patience: 50
-    val_fraction: 0.15
-    use_all_pixels: true
-    num_workers: 0
-    device: auto
+    type: xgboost_regressor
+    n_estimators: 20
+    max_depth: 6
+    learning_rate: 0.1
+    subsample: 1.0
+    colsample_bytree: 0.8
+    min_child_weight: 50
+    reg_alpha: 0.5
+    reg_lambda: 0.5
+    random_state: 42
+    n_jobs: -1
 
   prediction:
-    exclude_channels: false
+    probability_threshold: 0.5
+    exclude_channels: true

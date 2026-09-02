@@ -10,6 +10,7 @@ def predict_sliding_window(
     features: np.ndarray,
     cfg: dict[str, Any],
     batch_size: int = 8,
+    tobit_mode: bool = False,
 ) -> np.ndarray:
     """Sliding window inference over the full raster.
 
@@ -36,7 +37,8 @@ def predict_sliding_window(
     pad_w = _pad_needed(W, patch_size, stride)
     feat_pad = np.pad(features, ((0, 0), (0, pad_h), (0, pad_w)), mode="reflect")
 
-    prob_sum = np.zeros((H + pad_h, W + pad_w), dtype="float64")
+    n_out = 2 if tobit_mode else 1
+    prob_sums = [np.zeros((H + pad_h, W + pad_w), dtype="float64") for _ in range(n_out)]
     count = np.zeros((H + pad_h, W + pad_w), dtype="float64")
 
     # Collect all patch top-left corners
@@ -52,7 +54,7 @@ def predict_sliding_window(
     model.eval()
     model.to(device)
 
-    # Process in batches for GPU efficiency
+    # Process in batches
     with torch.no_grad():
         for i in range(0, len(corners), batch_size):
             batch_corners = corners[i : i + batch_size]
@@ -61,19 +63,27 @@ def predict_sliding_window(
                 axis=0,
             )
             x = torch.tensor(patches).to(device)
-            preds = model(x).squeeze(1).cpu().numpy()  # (B, ps, ps)
+            raw = model(x).cpu().numpy()  # (B, n_out, ps, ps)
 
-            for pred, (r, c) in zip(preds, batch_corners):
-                prob_sum[r : r + patch_size, c : c + patch_size] += pred
+            for pred, (r, c) in zip(raw, batch_corners):
+                for ch in range(n_out):
+                    prob_sums[ch][r : r + patch_size, c : c + patch_size] += pred[ch]
                 count[r : r + patch_size, c : c + patch_size] += 1.0
 
     # Crop back to original size and average
-    prob_sum = prob_sum[:H, :W]
     count = count[:H, :W]
+    covered = count > 0
+
+    if tobit_mode:
+        out = np.full((2, H, W), np.nan, dtype="float32")
+        for ch in range(2):
+            ch_map = prob_sums[ch][:H, :W]
+            out[ch][covered] = (ch_map[covered] / count[covered]).astype("float32")
+        return out  # (2, H, W): channel 0 = mu, channel 1 = log_sigma
 
     prob = np.full((H, W), np.nan, dtype="float32")
-    covered = count > 0
-    prob[covered] = (prob_sum[covered] / count[covered]).astype("float32")
+    ch_map = prob_sums[0][:H, :W]
+    prob[covered] = (ch_map[covered] / count[covered]).astype("float32")
     return prob
 
 

@@ -134,6 +134,8 @@ class _BufferedCV:
 
 def _safe_n_splits(cv_cfg: dict[str, Any], y: np.ndarray) -> int:
     requested = int(cv_cfg.get("n_splits", 5))
+    if np.issubdtype(y.dtype, np.floating):
+        return min(requested, len(y))
     _, counts = np.unique(y, return_counts=True)
     if counts.size < 2:
         raise ValueError("CV requires both positive and negative training labels.")
@@ -149,23 +151,26 @@ def _group_splitter(
     groups: np.ndarray,
     seed: int,
 ) -> tuple[Any, int]:
+    from sklearn.model_selection import GroupKFold
+
     unique_groups = np.unique(groups)
     requested = int(cv_cfg.get("n_splits", 5))
     n_splits = min(requested, int(unique_groups.size))
     if n_splits < 2:
         raise ValueError("Group CV needs at least two spatial/polygon groups.")
 
-    try:
-        from sklearn.model_selection import StratifiedGroupKFold
+    # StratifiedGroupKFold only works for classification targets
+    if not np.issubdtype(y.dtype, np.floating):
+        try:
+            from sklearn.model_selection import StratifiedGroupKFold
+            return (
+                StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=seed),
+                n_splits,
+            )
+        except ImportError:
+            pass
 
-        return (
-            StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=seed),
-            n_splits,
-        )
-    except ImportError:
-        from sklearn.model_selection import GroupKFold
-
-        return GroupKFold(n_splits=n_splits), n_splits
+    return GroupKFold(n_splits=n_splits), n_splits
 
 
 def _spatial_block_groups(

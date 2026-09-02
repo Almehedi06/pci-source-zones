@@ -15,14 +15,12 @@ from pathlib import Path
 import numpy as np
 import rasterio
 
-SRC_HI = Path("/mnt/c/Users/amehedi/Downloads/thomas/aligned/target_src_hi_aligned.tif")
-OUT_DIR = Path("/mnt/c/Users/amehedi/Downloads/thomas/aligned")
 NODATA = 255
 
 
-def make_binary_label(src_path: Path, threshold: float) -> Path:
+def make_binary_label(src_path: Path, out_dir: Path, threshold: float) -> Path:
     tag = f"{threshold:.2f}".replace(".", "")          # 0.10 → "010"
-    out_path = OUT_DIR / f"target_binary_t{tag}.tif"
+    out_path = out_dir / f"target_binary_t{tag}.tif"
 
     with rasterio.open(src_path) as src:
         data = src.read(1).astype("float32")
@@ -53,14 +51,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Threshold src_hi → binary label")
     parser.add_argument("--threshold", type=float, default=0.1,
                         help="src_hi >= threshold → source zone (default: 0.1)")
-    parser.add_argument("--src", type=Path, default=SRC_HI,
+    parser.add_argument("--src", type=Path, required=True,
                         help="Path to continuous src_hi raster")
+    parser.add_argument("--out-dir", type=Path, default=None,
+                        help="Output directory (default: same directory as --src)")
     args = parser.parse_args()
 
     if not args.src.exists():
         raise FileNotFoundError(f"Source raster not found: {args.src}")
 
-    make_binary_label(args.src, args.threshold)
+    out_dir = args.out_dir if args.out_dir is not None else args.src.parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+    make_binary_label(args.src, out_dir, args.threshold)
 
 
 if __name__ == "__main__":

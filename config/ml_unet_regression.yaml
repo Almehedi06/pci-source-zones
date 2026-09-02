@@ -1,11 +1,5 @@
 site: montecito
 
-# Attention UNet regression on p_obs_union — the strongest target found so far
-# (full 541K-pixel spatial coverage, no truncation, unlike C_eff targets).
-# Cloned from ml_unet_regression.yaml with target/tobit swapped after fixing
-# the use_all_pixels/tobit train-region leakage bug in unet_workflow.py —
-# this is the first honest (post-fix) run of this architecture on this target.
-
 paths:
   output_dir: /home/abdullah/ml_output
   # Relative feature/target filenames resolve against this directory.
@@ -13,10 +7,7 @@ paths:
   data_dir: /mnt/c/Users/amehedi/Downloads/thomas/aligned
 
 ml:
-  # Distinct output dir from ml_unet_regression.yaml's C_eff/tobit run —
-  # run_unet_workflow() always names the model "unet", so without this
-  # override both configs would silently overwrite the same directory.
-  output_subdir: source_area_workflow/ml/unet_p_obs_union
+  output_subdir: source_area_workflow/ml/{model}
 
   base_rasters:
     slope:         slope_aligned.tif
@@ -24,7 +15,7 @@ ml:
 
   target:
     type: raster_continuous
-    path: p_obs_union_aligned.tif
+    path: C_p_obs_union_log_aligned.tif
     export: true
 
   feature_paths:
@@ -56,7 +47,6 @@ ml:
       - curvature
       - aspect
       - elevation
-      - dnbr
       - et_diff
       - ndvi_diff
       - soil_thickness
@@ -83,7 +73,7 @@ ml:
     depth: 3
     dropout: 0.2
     attention: true
-    tobit: false
+    tobit: true
 
   unet:
     patch_size: 128
@@ -94,8 +84,14 @@ ml:
     early_stopping_patience: 50
     val_fraction: 0.15
     use_all_pixels: true
+    warm_start_epochs: 5
+    fixed_sigma: true
+    censored_weight: 0.2
     num_workers: 0
     device: auto
+    tobit:
+      censored_path:   censored_aligned.tif
+      logC_bound_path: logC_bound_aligned.tif
 
   prediction:
     exclude_channels: false

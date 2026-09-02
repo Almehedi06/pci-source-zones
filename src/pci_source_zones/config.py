@@ -104,6 +104,31 @@ def resolve_path(cfg: dict[str, Any], path: str | Path) -> Path:
     return repo_root(cfg) / p
 
 
+def get_data_dir(cfg: dict[str, Any]) -> Path | None:
+    """Return paths.data_dir if configured, else None."""
+    d = cfg.get("paths", {}).get("data_dir")
+    if d is None:
+        return None
+    return Path(str(d)).expanduser().resolve()
+
+
+def resolve_data_path(cfg: dict[str, Any], path: str | Path) -> Path:
+    """Resolve a path against data_dir (if set) or repo_root.
+
+    Absolute paths are returned unchanged — so existing absolute paths
+    in any config continue to work without modification.
+    Relative paths (plain filenames) are resolved against paths.data_dir
+    when configured, making configs portable across fire events.
+    """
+    p = Path(str(path)).expanduser()
+    if p.is_absolute():
+        return p
+    data = get_data_dir(cfg)
+    if data is not None:
+        return data / p
+    return repo_root(cfg) / p
+
+
 def output_path(cfg: dict[str, Any], key: str, default_name: str) -> Path:
     outputs = cfg.get("outputs", {})
     if key in outputs:

@@ -6,7 +6,7 @@ from typing import Any
 
 import numpy as np
 
-from pci_source_zones.config import output_path, resolve_path
+from pci_source_zones.config import output_path, resolve_data_path, resolve_path
 from pci_source_zones.inputs import read_raster
 
 
@@ -27,7 +27,7 @@ def build_target(cfg: dict[str, Any]) -> TargetData:
     nodata = int(target_cfg.get("nodata", 255))
 
     if target_type == "raster":
-        path = resolve_path(cfg, target_cfg["path"])
+        path = resolve_data_path(cfg, target_cfg["path"])
         arr, profile = read_raster(path)
         positive = int(target_cfg.get("positive_value", 1))
         valid = np.isfinite(arr)
@@ -84,7 +84,7 @@ def _read_g(cfg: dict[str, Any]) -> tuple[np.ndarray, dict[str, Any]]:
     ml_cfg = cfg.get("ml", {})
     base = ml_cfg.get("base_rasters", {})
     if "g" in base:
-        return read_raster(resolve_path(cfg, base["g"]))
+        return read_raster(resolve_data_path(cfg, base["g"]))
     return read_raster(output_path(cfg, "topographic_driving_index", "topographic_driving_index.tif"))
 
 
@@ -98,7 +98,7 @@ def _build_continuous_target(
     """
     if "path" not in target_cfg:
         raise ValueError("raster_continuous target requires ml.target.path.")
-    path = resolve_path(cfg, target_cfg["path"])
+    path = resolve_data_path(cfg, target_cfg["path"])
     arr, profile = read_raster(path)
     valid = np.isfinite(arr)
     target = np.full(arr.shape, -9999.0, dtype="float32")
@@ -130,7 +130,7 @@ def _build_multiclass_target(
     if "path" not in target_cfg:
         raise ValueError("multiclass_raster target requires ml.target.path.")
 
-    path = resolve_path(cfg, target_cfg["path"])
+    path = resolve_data_path(cfg, target_cfg["path"])
     arr, profile = read_raster(path)
     class_map: dict[int, int] | None = target_cfg.get("class_map", None)
 
@@ -154,8 +154,8 @@ def _read_dem_diff(cfg: dict[str, Any]) -> tuple[np.ndarray, dict[str, Any]]:
     ml_cfg = cfg.get("ml", {})
     base = ml_cfg.get("base_rasters", {})
     if "dem_diff" in base:
-        return read_raster(resolve_path(cfg, base["dem_diff"]))
+        return read_raster(resolve_data_path(cfg, base["dem_diff"]))
     if "dem_diff" in cfg.get("paths", {}):
-        return read_raster(resolve_path(cfg, cfg["paths"]["dem_diff"]))
+        return read_raster(resolve_data_path(cfg, cfg["paths"]["dem_diff"]))
     raise ValueError("Set ml.base_rasters.dem_diff or paths.dem_diff in the config.")
 

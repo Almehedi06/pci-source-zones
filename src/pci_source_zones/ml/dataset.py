@@ -37,7 +37,7 @@ def build_ml_dataset(cfg: dict[str, Any]) -> MLData:
 
     keep_feature_rows = np.isin(feature_stack.flat_indices, flat_indices)
     X = feature_stack.frame.iloc[keep_feature_rows].reset_index(drop=True)
-    y = target_data.target.ravel()[flat_indices].astype("uint8")
+    y = target_data.target.ravel()[flat_indices]  # preserve float32 for regression, uint8 for classification
 
     split_flat = make_splits(cfg, target_data.target, valid, target_data.profile)
     splits = {name: row_lookup[idx][row_lookup[idx] >= 0] for name, idx in split_flat.items()}
@@ -56,7 +56,8 @@ def build_ml_dataset(cfg: dict[str, Any]) -> MLData:
 def _validate_splits(splits: dict[str, np.ndarray], y: np.ndarray) -> None:
     if "train" not in splits or len(splits["train"]) == 0:
         raise ValueError("No training cells found. Check ml.split and target masks.")
-    if len(np.unique(y[splits["train"]])) < 2:
-        raise ValueError(
-            "Training split has only one class. Use more polygons/cells or adjust target controls."
-        )
+    if not np.issubdtype(y.dtype, np.floating):
+        if len(np.unique(y[splits["train"]])) < 2:
+            raise ValueError(
+                "Training split has only one class. Use more polygons/cells or adjust target controls."
+            )

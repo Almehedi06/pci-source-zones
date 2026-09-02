@@ -2,16 +2,35 @@ site: montecito
 
 # ── Input data (all 1m) ──────────────────────────────────────────
 inputs:
+  g_pre_10m:    /mnt/c/Users/amehedi/Downloads/thomas/G_before.tif
   g_pre_1m:     /mnt/c/Users/amehedi/Downloads/thomas/G_1m_dinf_delta/G_pre_dinf.tif
   delta_g_1m:   /mnt/c/Users/amehedi/Downloads/thomas/G_1m_dinf_delta/DeltaG_1m_dinf.tif
   ddem_1m:      /mnt/c/Users/amehedi/Downloads/LoD_filtered_dDEM/dDEM_LoD95_filtered_change.tif
   stable_cells: /mnt/c/Users/amehedi/Downloads/Thomas_xDEM/final_stable_cells.tif
   dem_pre:      /mnt/c/Users/amehedi/Downloads/thomas/dem_pre.tif
+  aoi:          /mnt/c/Users/amehedi/Downloads/thomas/aoi/montecito_aoi.shp
+
+  # ── 1m pre/post bare-earth DEMs for scripts/compute_terrain_deltas_1m.py ─
+  # Same DEMs the hand-run G_pre_dinf/DeltaG_1m_dinf above were built from.
+  dem_pre_1m:   /mnt/c/Users/amehedi/Downloads/thomas/Thomas_xDEM/final_pre_reference.tif
+  dem_post_1m:  /mnt/c/Users/amehedi/Downloads/thomas/Thomas_xDEM/final_post_corrected.tif
+
+  # Delta plan-curvature (not folded into p_obs C2/C3 evidence).
+  # Produced by scripts/compute_terrain_deltas_1m.py -> output_dir.g_dinf.
+  delta_c_1m:   /mnt/c/Users/amehedi/Downloads/thomas/g_dinf_v2/DeltaC_1m.tif
 
 # ── Output directories ───────────────────────────────────────────
 output_dir:
   labels:  /mnt/c/Users/amehedi/Downloads/source_zone_labels
   aligned: /mnt/c/Users/amehedi/Downloads/thomas/aligned
+  # scripts/compute_terrain_deltas_1m.py output -- separate from the hand-run
+  # thomas/G_1m_dinf_delta/ above until validated against it, then can be
+  # pointed at the same directory.
+  g_dinf:  /mnt/c/Users/amehedi/Downloads/thomas/g_dinf_v2
+
+# ── D-infinity G/curvature parameters (scripts/compute_terrain_deltas_1m.py) ─
+terrain_dinf:
+  alpha: 1.167
 
 # ── Reference grid (for alignment) ──────────────────────────────
 reference_grid: /mnt/c/Users/amehedi/Downloads/thomas/dem_diff.tif
@@ -35,11 +54,33 @@ lod_channel_exclusion:
 masking:
   apply:     true    # true = apply G-based masks; false = no masking (data-driven)
   g_min:     5       # mask pixels where G_pre < g_min  (ridges/flats)
-  g_channel: 200     # mask pixels where G_pre >= g_channel  (hillslope threshold, Erkan)
+  g_channel: 300     # mask pixels where G_pre >= g_channel  (hillslope threshold, Erkan)
 
 # ── C_eff soil resistance inversion (compute_ceff.py) ────────────
 ceff:
   p_obs_method:    union  # which p_obs layer to use: "intersection" or "union"
   elev_min:        600    # lower elevation bound for hillslope Gamma fit domain (m)
-  g_hillslope_max: 200    # upper G bound for hillslope domain (excludes channels)
+  g_hillslope_max: 300    # upper G bound for hillslope domain (excludes channels)
   g_mean_min:      0      # exclude cells with G_mean <= this in inversion
+  p_obs_ceil:          0.05   # Erkan: C upper bound — invert at this p_obs for p_obs=0 cells
+  elev_filter_outputs: true  # true = apply elev>elev_min to C inversion outputs (not just Gamma fit)
+
+# ── Stable-cell mask (scripts/compute_stable_cells.py) ───────────
+# Placeholder constant thresholds -- abs(value) < threshold -> stable.
+# Tune per layer/site; append more layers/conditions later (slope, G-range,
+# elevation, ...) without changing the combine logic. Output is written
+# separately from inputs.stable_cells above -- point inputs.stable_cells here
+# manually once validated, same validate-before-adopt pattern as g_dinf/g_dinf_v2.
+stable_cells:
+  layers:
+    - name: ddem
+      path: /mnt/c/Users/amehedi/Downloads/LoD_filtered_dDEM/dDEM_LoD95_filtered_change.tif
+      threshold: 1.0
+    - name: dg
+      path: /mnt/c/Users/amehedi/Downloads/thomas/g_dinf_v2/DeltaG_1m_dinf.tif
+      threshold: 3.0
+    - name: dc
+      path: /mnt/c/Users/amehedi/Downloads/thomas/g_dinf_v2/DeltaC_1m.tif
+      threshold: 0.1
+  combine: all
+  output: /mnt/c/Users/amehedi/Downloads/thomas/g_dinf_v2/stable_cells_1m.tif

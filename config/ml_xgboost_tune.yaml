@@ -1,22 +1,11 @@
 site: montecito
 
-# Attention UNet regression on p_obs_union — the strongest target found so far
-# (full 541K-pixel spatial coverage, no truncation, unlike C_eff targets).
-# Cloned from ml_unet_regression.yaml with target/tobit swapped after fixing
-# the use_all_pixels/tobit train-region leakage bug in unet_workflow.py —
-# this is the first honest (post-fix) run of this architecture on this target.
-
 paths:
   output_dir: /home/abdullah/ml_output
-  # Relative feature/target filenames resolve against this directory.
-  # Override at runtime: python scripts/09_run_unet.py --data-dir /path/to/event/aligned
   data_dir: /mnt/c/Users/amehedi/Downloads/thomas/aligned
 
 ml:
-  # Distinct output dir from ml_unet_regression.yaml's C_eff/tobit run —
-  # run_unet_workflow() always names the model "unet", so without this
-  # override both configs would silently overwrite the same directory.
-  output_subdir: source_area_workflow/ml/unet_p_obs_union
+  output_subdir: source_area_workflow/ml/{model}
 
   base_rasters:
     slope:         slope_aligned.tif
@@ -24,11 +13,10 @@ ml:
 
   target:
     type: raster_continuous
-    path: p_obs_union_aligned.tif
+    path: C_eff_log1p_aligned.tif
     export: true
 
   feature_paths:
-    # G is outside the aligned folder — keep as absolute until moved into data_dir for new events
     G:             /mnt/c/Users/amehedi/Downloads/G_topographic_driving_index.tif
     curvature:     curvature_aligned.tif
     aspect:        aspect_aligned.tif
@@ -56,46 +44,58 @@ ml:
       - curvature
       - aspect
       - elevation
-      - dnbr
+      # - burn_severity      # zero importance
       - et_diff
       - ndvi_diff
       - soil_thickness
       - sand_total
       - silt_total
+      # - clay_total         # near-zero, collinear with sand+silt
+      # - porosity           # zero importance, only 4 discrete values
       - ksat
       - ph
+      # - field_capacity     # zero importance, only 4 discrete values
       - precip_jan9
+      # - precip_jan10       # r=1.00 with precip_jan9, redundant
     categorical: []
 
   split:
     method: polygons
     polygons:
-      # Polygon file is outside the aligned folder — keep absolute or copy to data_dir for new events
-      path:      /mnt/c/Users/amehedi/Downloads/train_test_poly1.gpkg
+      path:      /mnt/c/Users/amehedi/Downloads/train_test_poly1.gpkg  # absolute — outside data_dir
       id_field:  id
       train_ids: [1, 2, 3, 4, 5, 6]
       test_ids:  [7, 8]
     val_size: 0.1
 
   model:
-    type: unet
-    base_filters: 16
-    depth: 3
-    dropout: 0.2
-    attention: true
-    tobit: false
+    type: xgboost_regressor
+    random_state: 42
+    n_jobs: 1
 
-  unet:
-    patch_size: 128
-    overlap: 0.75
-    batch_size: 16
-    epochs: 1000
-    learning_rate: 0.001
-    early_stopping_patience: 50
-    val_fraction: 0.15
-    use_all_pixels: true
-    num_workers: 0
-    device: auto
+  tuning:
+    search_method: random_search
+    scoring: r2
+    n_iter: 50
+    random_state: 42
+    n_jobs: 32
+    include_validation_in_tuning: false
+    dataset_cache: true
+
+    cv:
+      method: polygon_groups       # leave-one-polygon-out
+      n_splits: 6
+      seed: 42
+
+    search_space:
+      n_estimators:     [20, 30, 50, 80, 100, 150, 200]
+      max_depth:        [3, 4, 6, 8, 10]
+      learning_rate:    [0.001, 0.01, 0.02, 0.05, 0.08, 0.1, 0.2]
+      subsample:        [0.6, 0.7, 0.8, 1.0]
+      colsample_bytree: [0.5, 0.6, 0.8, 1.0]
+      min_child_weight: [5, 10, 20, 50]
+      reg_alpha:        [0.0, 0.1, 0.5, 1.0]
+      reg_lambda:       [0.5, 1.0, 2.0, 5.0]
 
   prediction:
     exclude_channels: false
