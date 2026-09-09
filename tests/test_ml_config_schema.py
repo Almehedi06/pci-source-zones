@@ -6,7 +6,12 @@ from pci_source_zones.config import load_config
 from pci_source_zones.ml.config_schema import validate_ml_config
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-ML_CONFIGS = sorted((REPO_ROOT / "config").glob("ml_*.yaml"))
+ML_CONFIGS = sorted((REPO_ROOT / "config" / "ml").glob("*.yaml"))
+
+# A glob that silently matches nothing turns a parametrised suite into zero
+# tests, which looks identical to "everything passed". Moving these files once
+# already did exactly that, so the empty case is now a hard failure.
+assert ML_CONFIGS, "no ML configs found under config/ml/ — did they move?"
 
 
 def _base_cfg() -> dict:

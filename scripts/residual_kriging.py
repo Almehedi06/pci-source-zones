@@ -6,7 +6,7 @@ prediction raster. Works on top of any model (RF, XGB, UNet).
 
 Run:
     conda run -n ml_debris python scripts/residual_kriging.py \
-        --config config/ml_random_forest.yaml \
+        --config config/ml/random_forest.yaml \
         --prediction /mnt/c/.../random_forest_regressor_prediction.tif
 
 Outputs (saved next to --prediction):
@@ -70,7 +70,7 @@ def regression_metrics(y_true, y_pred, label: str) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default="config/ml_random_forest.yaml")
+    parser.add_argument("--config", default="config/ml/random_forest.yaml")
     parser.add_argument("--prediction", required=True, help="Path to ML prediction raster (log1p space)")
     parser.add_argument("--n_sample", type=int, default=3000,
                         help="Training pixels to subsample for kriging (default 3000)")

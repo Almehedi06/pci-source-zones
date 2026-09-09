@@ -1,7 +1,7 @@
 import numpy as np
 from rasterio.transform import from_origin
 
-from pci_source_zones.polygons import extract_source_polygons
+from pci_source_zones.physics.polygons import extract_source_polygons
 
 
 def test_extract_source_polygons_from_small_raster():

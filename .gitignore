@@ -1,19 +1,19 @@
+# logs
+*.log
+logs/
+
+# python
 __pycache__/
 *.py[cod]
+*.egg-info/
 .pytest_cache/
 .ruff_cache/
-.ipynb_checkpoints/
-
-data/raw/*
-data/processed/*
-data/outputs/*
-!data/raw/.gitkeep
-!data/processed/.gitkeep
-!data/outputs/.gitkeep
-
-*.egg-info/
 build/
 dist/
-output.png
 
-*.log
+# notebooks
+.ipynb_checkpoints/
+
+# outputs
+output.png
+runs/

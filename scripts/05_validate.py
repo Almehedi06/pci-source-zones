@@ -12,7 +12,7 @@ from pci_source_zones.inputs import read_raster  # noqa: E402
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Print basic PCI output checks.")
-    parser.add_argument("--config", default="config/montecito.yaml")
+    parser.add_argument("--config", default="config/legacy/montecito_physics.yaml")
     args = parser.parse_args()
     cfg = load_config(args.config)
     pci_path = output_path(cfg, "pci", "pci.tif")

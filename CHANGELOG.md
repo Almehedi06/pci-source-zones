@@ -1,5 +1,43 @@
 # Changelog
 
+## Unreleased — pipeline consolidation
+
+One command, one config schema, one definition of every quantity.
+
+### Added
+- `pci-zones` console entry point (`run`, `validate`, `list`).
+- Canonical site config schema (`config/templates/site.yaml`); unknown keys are
+  a hard error.
+- Stage runner with resumability, per-area failure isolation, and a run manifest
+  recording config and git SHA.
+- Stages `terrain` (G, DeltaG from the DEM pair) and `stable` (stable-ground
+  mask), so the pipeline runs from pre-DEM / post-DEM / dDEM.
+- `physics/`, `evidence/`, `ml/` subpackages over a flat foundation.
+- Invariant checks (`checks.py`) targeting silent-failure classes.
+- CI on every push; 240 tests.
+
+### Changed
+- **C3 detection limit is now one key.** `evidence.c3.lod` takes `auto`, a
+  constant in metres, or a per-cell sigma raster, replacing the former `mode` /
+  `threshold` / `sigma_path` / `sigma_scale` block. `auto` is the default and
+  measures the LoD from stable ground, so C2 and C3 share one rule.
+- NMAD is now median-centred, so a residual dDEM bias no longer inflates it.
+- Flow routing is WhiteboxTools D-infinity everywhere; the Landlab D8 path and
+  the `landlab` dependency are gone.
+- Alignment is a pipeline stage, not a separate command or config file.
+- `scipy` and `whitebox` are now declared dependencies (they were always
+  required); `torch` moved to the `dl` extra.
+- ML configs moved to `config/ml/`; the legacy physics config to `config/legacy/`.
+- LoD output renamed `dg_lod.json` -> `lod.json` (it now holds both thresholds).
+
+### Removed
+- `compute_p_obs.py`, `compute_ceff.py`, `compute_dg_lod.py`,
+  `compute_channel_mask.py`, `batch_*.py` — replaced by `pci-zones run`.
+- `compute_terrain_deltas_1m.py` and `compute_stable_cells.py` are deprecation
+  shims forwarding to the `terrain` and `stable` stages.
+- `raster.read_match` (unused).
+
+
 All notable changes to the pci-source-zones pipeline are recorded here.
 Format: `[YYYY-MM-DD] — summary`
 

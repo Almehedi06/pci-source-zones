@@ -13,13 +13,13 @@ Usage:
     # point at a training run directory (finds the model artifact inside)
     conda run -n ml_debris python scripts/13_predict.py \\
         --model /home/abdullah/ml_output/source_area_workflow/ml/random_forest_regressor/20260819_043034_dcd85c7 \\
-        --config config/ml_random_forest.yaml \\
+        --config config/ml/random_forest.yaml \\
         --data-dir /path/to/new_fire/aligned \\
         --out /path/to/new_fire/predictions
 
     # or point at the model file directly
     conda run -n ml_debris python scripts/13_predict.py \\
-        --model .../unet_weights.pt --config config/ml_unet_p_obs_union.yaml \\
+        --model .../unet_weights.pt --config config/ml/unet_p_obs_union.yaml \\
         --data-dir /path/to/new_fire/aligned --out /path/to/out
 """
 from __future__ import annotations

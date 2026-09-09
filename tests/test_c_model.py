@@ -1,6 +1,6 @@
 import numpy as np
 
-from pci_source_zones.c_model import (
+from pci_source_zones.physics.c_model import (
     bare_soil_roughness,
     critical_shear_stress,
     modeled_threshold_c,

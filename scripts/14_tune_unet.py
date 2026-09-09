@@ -6,11 +6,11 @@ rather than on how well they exploit spatial autocorrelation. The test
 polygons are never touched.
 
 Usage:
-    conda run -n ml_debris python scripts/14_tune_unet.py --config config/ml_unet_tune.yaml
+    conda run -n ml_debris python scripts/14_tune_unet.py --config config/ml/unet_tune.yaml
 
     # long sweeps: run detached and watch the log
     nohup conda run --no-capture-output -n ml_debris python -u \\
-        scripts/14_tune_unet.py --config config/ml_unet_tune.yaml > unet_tune.log 2>&1 &
+        scripts/14_tune_unet.py --config config/ml/unet_tune.yaml > unet_tune.log 2>&1 &
 """
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ from pci_source_zones.ml.unet_tuning import run_unet_tuning  # noqa: E402
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Tune UNet hyperparameters.")
-    parser.add_argument("--config", default="config/ml_unet_tune.yaml")
+    parser.add_argument("--config", default="config/ml/unet_tune.yaml")
     parser.add_argument(
         "--data-dir",
         default=None,

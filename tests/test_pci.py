@@ -1,6 +1,6 @@
 import numpy as np
 
-from pci_source_zones.pci import deterministic_pci, pci_from_exceedance_count
+from pci_source_zones.physics.pci import deterministic_pci, pci_from_exceedance_count
 
 
 def test_deterministic_pci():

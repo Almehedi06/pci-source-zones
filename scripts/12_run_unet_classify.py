@@ -6,7 +6,7 @@ vs regression (MSE/Tobit) automatically. This script is just a convenience
 entry point defaulting to a classification-flavored config.
 
 Usage:
-    conda run -n ml_debris python scripts/12_run_unet_classify.py --config config/ml_unet.yaml
+    conda run -n ml_debris python scripts/12_run_unet_classify.py --config config/ml/unet.yaml
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from pci_source_zones.ml.unet_workflow import run_unet_workflow  # noqa: E402
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="UNet classification pipeline")
-    parser.add_argument("--config", default="config/ml_unet.yaml", help="Path to YAML config")
+    parser.add_argument("--config", default="config/ml/unet.yaml", help="Path to YAML config")
     args = parser.parse_args()
 
     cfg = load_config(args.config)

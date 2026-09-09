@@ -7,12 +7,12 @@ from _bootstrap import add_src_to_path
 add_src_to_path()
 
 from pci_source_zones.config import load_config  # noqa: E402
-from pci_source_zones.pipeline import compute_c_and_pci  # noqa: E402
+from pci_source_zones.physics.pipeline import compute_c_and_pci  # noqa: E402
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Compute PCI raster.")
-    parser.add_argument("--config", default="config/montecito.yaml")
+    parser.add_argument("--config", default="config/legacy/montecito_physics.yaml")
     args = parser.parse_args()
     outputs = compute_c_and_pci(load_config(args.config))
     print(f"pci: {outputs['pci']}")

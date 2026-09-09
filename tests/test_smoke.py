@@ -8,7 +8,7 @@ import rasterio
 import yaml
 from rasterio.transform import from_origin
 
-from pci_source_zones.pipeline import run_all
+from pci_source_zones.physics.pipeline import run_all
 
 
 @pytest.mark.skipif(importlib.util.find_spec("landlab") is None, reason="landlab not installed")

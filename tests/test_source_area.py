@@ -6,7 +6,7 @@ import yaml
 from rasterio.transform import from_origin
 
 from pci_source_zones.config import load_config
-from pci_source_zones.source_area import (
+from pci_source_zones.physics.source_area import (
     build_c_sample_table,
     erosion_mask_from_dem_diff,
     pci_from_c_samples,

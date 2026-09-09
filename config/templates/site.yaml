@@ -1,0 +1,124 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Canonical site configuration template.
+#
+# Copy to config/sites/<site>_<pre>_<post>.yaml and edit. Every value below is
+# either required or shown at its default. Unknown keys are a hard error, so a
+# mistyped threshold fails loudly instead of being silently ignored.
+#
+#   pci-zones validate --config config/sites/<your>.yaml
+#   pci-zones run      --config config/sites/<your>.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+
+site: example_fire            # REQUIRED. Short identifier.
+
+epochs:                       # Free-form; recorded in the run manifest.
+  pre: 2016
+  post: 2025
+
+grid:
+  fine_res_m: 1.0             # resolution of the evidence rasters
+  coarse_res_m: 10.0          # modelling resolution
+  # coarse_res_m / fine_res_m must be a whole number — it is the block factor
+  crs: null                   # optional; inferred from the inputs when null
+
+inputs:
+  mode: single                # single | batch
+
+  # ── single mode: explicit paths ────────────────────────────────────────────
+  dz: /path/to/dDEM.tif               # needed for the evidence stage
+
+  # Then EITHER let the terrain stage derive G and DeltaG from the DEM pair:
+  dem_pre: /path/to/dem_pre.tif
+  dem_post: /path/to/dem_post.tif
+  # OR supply them directly and drop the terrain stage:
+  # g_pre: /path/to/G_pre.tif         # terrain forcing, pre-event
+  # delta_g: /path/to/DeltaG.tif      # change in terrain forcing
+
+  stable_cells: /path/to/stable.tif   # or let the `stable` stage build it
+  dem: /path/to/dem.tif               # needed if ceff.elev_min is set
+  aoi: null                           # optional polygon clip
+  dz_nodata: null                     # override the dz file's declared nodata
+
+  # ── batch mode: roots + templates, {id} discovered from disk ───────────────
+  # mode: batch
+  # roots:
+  #   delta_g: /data/DeltaG
+  #   dz: /data/DetectableDoD
+  #   g_pre: /data/G
+  #   stable_cells: /data/stable
+  # templates:
+  #   delta_g: "{id}/DeltaG_1m.tif"
+  #   dz: "{id}_Detectable_DoD.tif"
+  #   g_pre: "{id}/G_pre.tif"
+  #   stable_cells: "{id}/stable.tif"
+  # id_glob: null                     # optional override of the discovery glob
+
+outputs:
+  root: /path/to/output
+  layout: "{id}"              # batch only: per-area subdirectory
+
+# Optional. Puts predictor rasters on a common reference grid before anything
+# else runs — a site-level stage, not a separate command. Either a path to an
+# alignment YAML (resolved relative to this file) or the same keys inline.
+# align: my_site_align.yaml
+# align:
+#   reference: /path/to/reference.tif
+#   aoi: /path/to/aoi.shp            # optional; outside -> nodata
+#   output_dir: /path/to/aligned
+#   nodata: -9999.0
+#   layers:
+#     - {name: slope,         path: /path/to/slope.tif,    resampling: bilinear}
+#     - {name: burn_severity, path: /path/to/severity.tif, resampling: nearest}
+
+terrain:                      # G = a * S^alpha, and DeltaG between epochs
+  alpha: 1.167                # 7/6, from the shear-stress derivation
+  fill_sinks: true
+  curvature: false            # also write DeltaC.tif (dinf only)
+
+stable:                       # the sample the detection threshold is estimated from
+  method: criteria            # criteria | threshold
+  # criteria   stable ground from predictors INDEPENDENT of the change signal.
+  #            Recommended. Standard dDEM practice.
+  # threshold  |layer| < t on the change layers themselves. CIRCULAR when those
+  #            are the same signals whose LoD is being estimated: it selects the
+  #            small-residual tail and biases tau low. Explicit opt-in only.
+  combine: all                # all (AND) | any (OR)
+  min_frac: 0.02              # warn if the stable sample is smaller than this
+  layers:
+    - {name: slope,   path: /path/to/slope_deg.tif, max: 30.0}
+    - {name: channel, path: /path/to/G_pre.tif,     max: 300.0}
+    - {name: burned,  path: /path/to/burn.tif,      max: 1.0, invert: true}
+  # each layer takes EITHER threshold (|v| < t) OR min/max (min <= v < max);
+  # `invert: true` makes the layer mean "stable OUTSIDE this mask"
+
+lod:
+  method: nmad                # only nmad is implemented
+  scale: 2.0                  # tau = scale * NMAD; 2.0 is roughly 95%
+  exclude_channels: false     # drop channel cells from the stable sample
+  g_channel: null             # cutoff for the above; falls back to domain value
+
+evidence:
+  apply_domain: true
+  c3:
+    # C3 = 1[ dz < -lod ].  `lod` is the detection limit in metres and takes
+    # one of four forms:
+    #   auto      derive it from this site: scale x NMAD of dz on stable ground
+    #             (same rule C2 uses for DeltaG). No site-specific number.
+    #   0         the dDEM is already LoD-filtered, so any lowering counts
+    #   0.175     a constant level of detection, in metres
+    #   /s.tif    a per-cell sigma raster, multiplied by scale
+    lod: auto
+    scale: 2.0
+  domain:                     # which cells are ANALYSED, never what counts as erosion
+    g_min: 5.0                # below this: ridges and flats, no convergence
+    g_channel: 300.0          # at or above: established channels, wrong process
+    elev_min: null
+    slope_max_deg: null       # e.g. 55 to exclude rock outcrop
+
+ceff:
+  p_obs_methods: [intersection, union]
+  elev_min: 600.0             # elevation floor for the Gamma domain; null to disable
+  elev_filter_outputs: true   # also apply that floor to the inverted outputs
+  g_hillslope_max: 300.0
+  p_ceiling: 0.05             # fixed p for the upper-bound layer on p_obs == 0 cells
+  min_domain_cells: 100       # fail if the Gamma domain is smaller than this
