@@ -41,6 +41,8 @@ import yaml
 
 from . import runner
 from .align import AlignError
+from .contract import (ContractError, check_inputs,
+                       format_issues)
 from .prep import PrepConfig, PrepError, run_prep
 from .geometry import parse_ids
 from .site_config import ConfigError, SiteConfig
@@ -89,7 +91,18 @@ def cmd_validate(args) -> int:
     print(f"  align       : {len(acfg.layers)} layer(s)" if acfg else
           "  align       : not configured")
     print(f"  output root : {cfg.output_root()}")
-    return 0
+
+    area = None
+    if cfg.is_batch:
+        try:
+            area = (runner.discover_areas(cfg)[:1] or [None])[0]
+        except FileNotFoundError:
+            area = None
+    issues = check_inputs(cfg, area, missing_is_error=False,
+                          stages=list(runner.STAGES))
+    print()
+    print(format_issues(issues))
+    return 1 if any(i.level == "error" for i in issues) else 0
 
 
 def cmd_prep(args) -> int:
@@ -152,6 +165,9 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
     try:
         return args.func(args)
+    except ContractError as exc:
+        print(f"input contract failed:\n{exc}", file=sys.stderr)
+        return 2
     except (ConfigError, AlignError, PrepError) as exc:
         print(f"config error: {exc}", file=sys.stderr)
         return 2

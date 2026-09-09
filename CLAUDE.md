@@ -28,6 +28,12 @@ it are silent when broken: mask fill values *before* resampling, and never apply
 an elevation-style `valid_min` to a difference raster — negatives there are the
 erosion signal, and removing them yields an all-positive dDEM that looks fine.
 
+**The input contract is checked at the door.** `contract.py` verifies one grid,
+square pixels, declared nodata and a source for every quantity a requested stage
+needs — at `validate` and again at the top of `run`, reporting every problem at
+once. It only reads; fixing belongs to `prep` or upstream. Keep it that way, or
+it becomes a second data-preparation tool.
+
 **A new site is a config file, never a code change.** If you find yourself
 editing a module to onboard a fire, the config schema is missing a key.
 

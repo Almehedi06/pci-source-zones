@@ -6,6 +6,10 @@ One command, one config schema, one definition of every quantity.
 
 ### Added
 - `pci-zones` console entry point (`run`, `validate`, `prep`, `list`).
+- Input contract check (`contract.py`): one grid, square pixels, declared
+  nodata, and a source for every quantity the requested stages need. Reported by
+  `validate`, enforced by `run`, all problems at once. Non-square pixels were
+  previously checked nowhere — they never failed, they just made slope wrong.
 - `prep` command: masks undeclared fill values and puts delivered rasters
   on one square grid. Rejects an elevation-style `valid_min` on a
   difference raster, and `--scan` reports candidate fills before writing.

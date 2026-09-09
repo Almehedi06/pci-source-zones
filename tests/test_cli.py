@@ -15,7 +15,7 @@ def cfg_path(tmp_path):
     p.write_text(yaml.safe_dump({
         "site": "t",
         "inputs": {"mode": "single", "g_pre": "g.tif", "delta_g": "d.tif",
-                   "dz": "z.tif"},
+                   "dz": "z.tif", "stable_cells": "s.tif"},
         "outputs": {"root": str(tmp_path / "out")},
     }))
     return p
@@ -24,7 +24,8 @@ def cfg_path(tmp_path):
 def test_validate_runs_and_reports(cfg_path, capsys):
     assert cli.main(["validate", "--config", str(cfg_path)]) == 0
     out = capsys.readouterr().out
-    for line in ("config OK", "grid", "c3 lod", "terrain", "output root"):
+    for line in ("config OK", "grid", "c3 lod", "terrain", "output root",
+                 "input contract"):
         assert line in out
 
 

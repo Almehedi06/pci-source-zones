@@ -33,6 +33,7 @@ import numpy as np
 
 from . import checks, evidence
 from .align import run_alignment
+from .contract import require_contract
 from .geometry import rasterize_aoi, sort_ids
 
 VECTOR_SUFFIXES = {".shp", ".gpkg", ".geojson", ".json", ".gdb", ".fgb"}
@@ -575,6 +576,10 @@ def run(cfg: SiteConfig, stages: Iterable[str], areas: list[str] | None = None,
     ids = discover_areas(cfg, areas)
     label = "area" if cfg.is_batch else "site"
     print(f"{cfg.site}: {len(ids)} {label}(s), stages {stages}")
+
+    # Refuse at the door rather than mid-run: a grid mismatch used to surface
+    # inside `lod`, after the terrain stage had already routed both DEMs.
+    require_contract(cfg, ids[0] if ids else None, stages)
 
     results: list[AreaResult] = []
 

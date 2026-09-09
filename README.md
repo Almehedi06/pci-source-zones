@@ -17,6 +17,11 @@ Or run from the repo root with `PYTHONPATH=src`.
 
 ## Quick start
 
+`validate` reports whether the inputs meet the contract — one grid, square
+pixels, declared nodata — before anything is computed, and `run` refuses if they
+do not. A grid mismatch used to surface inside `lod`, after the terrain stage had
+already routed both DEMs.
+
 ```bash
 # prepare delivered rasters, if they are not already one square grid
 pci-zones prep --config config/templates/prep.yaml --scan   # report fill values

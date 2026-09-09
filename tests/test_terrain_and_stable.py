@@ -168,10 +168,21 @@ def test_dem_pair_satisfies_the_input_requirement(tmp_path):
 
 
 def test_terrain_stage_fails_without_dems_or_precomputed_g(tmp_path):
+    """The stage itself still refuses, independent of the contract gate."""
     cfg = SiteConfig.parse({"site": "t", "inputs": {"mode": "single", "dz": "x.tif"},
                             "outputs": {"root": str(tmp_path)}})
-    res = runner.run(cfg, ["terrain"])[0]
-    assert res.status == "failed" and "dem_pre" in res.error
+    with pytest.raises(ValueError, match="dem_pre"):
+        runner.stage_terrain(cfg, None)
+
+
+def test_run_refuses_before_computing_when_g_has_no_source(tmp_path):
+    """The point of the contract: fail at the door, not after routing two DEMs."""
+    from pci_source_zones.contract import ContractError
+
+    cfg = SiteConfig.parse({"site": "t", "inputs": {"mode": "single", "dz": "x.tif"},
+                            "outputs": {"root": str(tmp_path)}})
+    with pytest.raises(ContractError, match="no source for G"):
+        runner.run(cfg, ["terrain"])
 
 
 def test_terrain_stage_feeds_the_next_stage(tmp_path):
