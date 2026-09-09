@@ -19,6 +19,11 @@ section aligns its predictor rasters first, then runs the rest:
 
     pci-zones run --config config/sites/montecito_2016_2018.yaml --stages align
 
+Put delivered rasters on one analysis-ready grid first, if they are not already:
+
+    pci-zones prep --config config/prep/<site>_prep.yaml --scan   # inspect fills
+    pci-zones prep --config config/prep/<site>_prep.yaml
+
 Validate a config without running anything:
 
     pci-zones validate --config config/sites/eaton_2016_2025.yaml
@@ -36,6 +41,7 @@ import yaml
 
 from . import runner
 from .align import AlignError
+from .prep import PrepConfig, PrepError, run_prep
 from .geometry import parse_ids
 from .site_config import ConfigError, SiteConfig
 
@@ -86,6 +92,12 @@ def cmd_validate(args) -> int:
     return 0
 
 
+def cmd_prep(args) -> int:
+    cfg = PrepConfig.load(args.config)
+    run_prep(cfg, overwrite=args.overwrite, scan_only=args.scan)
+    return 0
+
+
 def cmd_list(args) -> int:
     cfg = load_cfg(args)
     ids = runner.discover_areas(cfg, parse_ids(args.ids))
@@ -125,6 +137,14 @@ def main(argv: list[str] | None = None) -> int:
     add_common(v)
     v.set_defaults(func=cmd_validate)
 
+    p_ = sub.add_parser("prep",
+                        help="put delivered rasters on one analysis-ready grid")
+    p_.add_argument("--config", required=True, help="prep config YAML")
+    p_.add_argument("--overwrite", action="store_true")
+    p_.add_argument("--scan", action="store_true",
+                    help="report undeclared fill values and write nothing")
+    p_.set_defaults(func=cmd_prep)
+
     l = sub.add_parser("list", help="list the analysis areas a config resolves to")
     add_common(l)
     l.set_defaults(func=cmd_list)
@@ -132,7 +152,7 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
     try:
         return args.func(args)
-    except (ConfigError, AlignError) as exc:
+    except (ConfigError, AlignError, PrepError) as exc:
         print(f"config error: {exc}", file=sys.stderr)
         return 2
     except FileNotFoundError as exc:

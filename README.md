@@ -18,6 +18,10 @@ Or run from the repo root with `PYTHONPATH=src`.
 ## Quick start
 
 ```bash
+# prepare delivered rasters, if they are not already one square grid
+pci-zones prep --config config/templates/prep.yaml --scan   # report fill values
+pci-zones prep --config <site>_prep.yaml
+
 # check a config without running anything
 pci-zones validate --config config/sites/montecito_2016_2018.yaml
 
@@ -50,6 +54,13 @@ batch of one, through the same code path.
 
 Each stage skips work whose outputs already exist, isolates failures per
 analysis area, and contributes to a run summary and manifest.
+
+Survey products rarely arrive analysis-ready. `prep` puts them on one square
+grid with real nodata, and encodes the two mistakes that are silent when made:
+fill values must be masked **before** resampling, or an interpolating resampler
+blends them into real data; and a DEM and a difference need opposite rules,
+because in a dDEM the negatives are the erosion signal. Skip `prep` entirely
+when inputs are already one square grid with proper nodata.
 
 The pipeline's real inputs are **three rasters: a pre-event DEM, a post-event
 DEM, and a dDEM**. Everything else — G, DeltaG, the stable mask, tau — is derived

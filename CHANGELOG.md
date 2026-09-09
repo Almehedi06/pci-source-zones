@@ -5,7 +5,10 @@
 One command, one config schema, one definition of every quantity.
 
 ### Added
-- `pci-zones` console entry point (`run`, `validate`, `list`).
+- `pci-zones` console entry point (`run`, `validate`, `prep`, `list`).
+- `prep` command: masks undeclared fill values and puts delivered rasters
+  on one square grid. Rejects an elevation-style `valid_min` on a
+  difference raster, and `--scan` reports candidate fills before writing.
 - Canonical site config schema (`config/templates/site.yaml`); unknown keys are
   a hard error.
 - Stage runner with resumability, per-area failure isolation, and a run manifest

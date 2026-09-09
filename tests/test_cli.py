@@ -80,3 +80,35 @@ def test_every_script_config_default_exists():
                 missing.append(f"{script.name} -> {ref}")
     assert not missing, "scripts reference configs that do not exist:\n  " + \
         "\n  ".join(missing)
+
+
+def test_prep_scan_writes_nothing(tmp_path, capsys):
+    """--scan must report and stop, never touch the output directory."""
+    import numpy as np, rasterio
+    from rasterio.transform import from_origin
+
+    src = tmp_path / "a.tif"
+    arr = np.full((30, 30), 100.0, dtype="float32"); arr[:10] = 0.0
+    with rasterio.open(src, "w", driver="GTiff", height=30, width=30, count=1,
+                       dtype="float32", crs="EPSG:32610",
+                       transform=from_origin(0, 30, 1, 1)) as d:
+        d.write(arr, 1)
+
+    cfg = tmp_path / "prep.yaml"
+    cfg.write_text(yaml.safe_dump({
+        "target": {"res": 2.0}, "output_dir": str(tmp_path / "out"),
+        "rasters": [{"name": "a", "path": str(src), "kind": "dem"}]}))
+
+    assert cli.main(["prep", "--config", str(cfg), "--scan"]) == 0
+    assert "likely fill" in capsys.readouterr().out
+    assert not (tmp_path / "out").exists()
+
+
+def test_prep_bad_config_exits_two(tmp_path, capsys):
+    cfg = tmp_path / "bad.yaml"
+    cfg.write_text(yaml.safe_dump({"target": {"res": 2.0},
+                                   "output_dir": str(tmp_path),
+                                   "rasters": [{"name": "d", "path": "x.tif",
+                                                "kind": "diff", "valid_min": 0}]}))
+    assert cli.main(["prep", "--config", str(cfg)]) == 2
+    assert "valid_min is not allowed" in capsys.readouterr().err

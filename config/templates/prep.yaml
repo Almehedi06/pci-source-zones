@@ -1,0 +1,49 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Input preparation template.
+#
+# Run this only when delivered rasters are not already analysis-ready: different
+# grids, non-square pixels, or undeclared fill values. If they are already one
+# square grid with proper nodata, skip prep entirely and go straight to `run`.
+#
+#   pci-zones prep --config <this> --scan     # report fill values, write nothing
+#   pci-zones prep --config <this>
+#   pci-zones run  --config <site>.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+
+target:
+  res: 2.0                  # REQUIRED. Square pixels, in CRS units.
+                            # Choose at or above the coarsest native resolution —
+                            # a finer grid invents detail that was never surveyed.
+  crs: null                 # optional; taken from the first raster when null
+  extent: intersection      # intersection | union | [xmin, ymin, xmax, ymax]
+  nodata: -9999.0
+
+output_dir: /path/to/prep
+
+rasters:
+  # kind: dem   elevation. `valid_min` may be used — anything at or below it is
+  #             fill. Safe here because ground elevation has a known floor.
+  # kind: diff  a difference (dDEM). NEGATIVES ARE THE EROSION SIGNAL, so
+  #             `valid_min` is rejected. List exact fill values under `fill`.
+  #
+  # `fill` holds exact values that mean "no data" but were never declared as
+  # such. Run with --scan first: any value occupying a large share of a
+  # continuous surface is a fill somebody forgot to declare.
+
+  - name: dem_pre
+    path: /path/to/pre.tif
+    kind: dem
+    fill: [0, -999]
+    valid_min: 0
+    resampling: bilinear    # bilinear | cubic | average | nearest
+
+  - name: dem_post
+    path: /path/to/post.tif
+    kind: dem
+    fill: [0, -999]
+    valid_min: 0
+
+  - name: dz
+    path: /path/to/ddem.tif
+    kind: diff
+    fill: [0, -999]

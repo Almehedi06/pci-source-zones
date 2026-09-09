@@ -16,9 +16,17 @@ pytest -q
 ```
 
 Stages: `align → terrain → stable → lod → evidence → p_obs → ceff`.
+`prep` is a separate command that runs before all of it, only when the delivered
+rasters are not already one square grid with real nodata.
 Real inputs are **pre-DEM, post-DEM, dDEM**; everything else is derived.
 
 ## Conventions that matter
+
+**Input preparation is a command, not a script per fire.** `prep` exists so
+nobody hand-writes another regrid script with a hardcoded extent. Two rules in
+it are silent when broken: mask fill values *before* resampling, and never apply
+an elevation-style `valid_min` to a difference raster — negatives there are the
+erosion signal, and removing them yields an all-positive dDEM that looks fine.
 
 **A new site is a config file, never a code change.** If you find yourself
 editing a module to onboard a fire, the config schema is missing a key.
