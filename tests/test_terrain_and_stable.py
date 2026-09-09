@@ -15,7 +15,20 @@ from pci_source_zones.physics.terrain import (
 )
 from pci_source_zones.site_config import ConfigError, SiteConfig
 
-whitebox = pytest.importorskip("whitebox")
+def _whitebox_usable() -> bool:
+    """Importing whitebox is not enough — it fetches a binary on first use."""
+    try:
+        import whitebox
+        wbt = whitebox.WhiteboxTools()
+        wbt.verbose = False
+        return bool(wbt.version())
+    except Exception:
+        return False
+
+
+pytestmark = pytest.mark.skipif(
+    not _whitebox_usable(),
+    reason="WhiteboxTools binary unavailable (import alone does not guarantee it)")
 
 
 def _raster(path, arr, res=1.0, origin=(500000, 5000000), crs="EPSG:32610"):

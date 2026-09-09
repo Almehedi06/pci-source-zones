@@ -12,7 +12,7 @@ from pci_source_zones.ml.unet_workflow import run_unet_workflow  # noqa: E402
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train and evaluate a UNet source-zone model.")
-    parser.add_argument("--config", default="config/ml_unet.yaml")
+    parser.add_argument("--config", default="config/ml/unet.yaml")
     parser.add_argument(
         "--data-dir",
         default=None,

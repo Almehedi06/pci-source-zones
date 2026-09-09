@@ -61,3 +61,22 @@ def test_align_is_a_stage_not_a_verb():
     import argparse
     with pytest.raises(SystemExit):
         cli.main(["align", "--config", "x.yaml"])
+
+
+def test_every_script_config_default_exists():
+    """A --config default pointing at a moved file breaks only at runtime.
+
+    Relocating the ML configs once already broke eight scripts this way, so the
+    defaults are now checked here rather than discovered by a failed run.
+    """
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    missing = []
+    for script in sorted((root / "scripts").glob("*.py")):
+        for ref in re.findall(r"config/[\w/]+\.yaml", script.read_text()):
+            if not (root / ref).exists():
+                missing.append(f"{script.name} -> {ref}")
+    assert not missing, "scripts reference configs that do not exist:\n  " + \
+        "\n  ".join(missing)

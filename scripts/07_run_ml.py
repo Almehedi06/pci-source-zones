@@ -12,7 +12,7 @@ from pci_source_zones.ml.workflow import run_ml_workflow  # noqa: E402
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run a source-zone ML workflow.")
-    parser.add_argument("--config", default="config/ml_random_forest.yaml")
+    parser.add_argument("--config", default="config/ml/random_forest.yaml")
     parser.add_argument(
         "--model",
         default=None,
