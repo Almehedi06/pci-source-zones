@@ -430,6 +430,7 @@ class SiteConfig:
         outputs = _require(d, "outputs", "config root")
         if "root" not in outputs:
             raise ConfigError("outputs: missing required key 'root'")
+        _reject_ambiguous_sources(d)
         return cls(
             site=str(_require(d, "site", "config root")),
             epochs=d.get("epochs", {}),
@@ -454,6 +455,29 @@ class SiteConfig:
         if overrides:
             data = deep_merge(data, overrides)
         return cls.parse(data, source_path=path)
+
+
+def _reject_ambiguous_sources(d: dict) -> None:
+    """A quantity may be computed here or supplied — never both.
+
+    When both are configured the stage output silently wins and the supplied
+    file is ignored without a word, which is exactly the class of quiet override
+    this pipeline treats as a defect. Both routes stay available; the config
+    just has to say which one it means.
+    """
+    inputs = d.get("inputs") or {}
+    if d.get("stable") and inputs.get("stable_cells"):
+        raise ConfigError(
+            "stable ground is configured twice: a 'stable:' section computes the "
+            "mask and inputs.stable_cells supplies one. Keep exactly one — the "
+            "computed mask would silently win.")
+    has_dems = bool(inputs.get("dem_pre") and inputs.get("dem_post"))
+    has_g = bool(inputs.get("g_pre") and inputs.get("delta_g"))
+    if has_dems and has_g:
+        raise ConfigError(
+            "terrain forcing is configured twice: dem_pre/dem_post let the "
+            "terrain stage derive G, and g_pre/delta_g supply it. Keep exactly "
+            "one — the derived rasters would silently win.")
 
 
 def validate_align(spec: Any, source_path: Path | None) -> str | dict | None:

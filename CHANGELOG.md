@@ -24,6 +24,9 @@ One command, one config schema, one definition of every quantity.
 - CI on every push; 240 tests.
 
 ### Changed
+- A config that both computes and supplies the same quantity (the stable
+  mask, or terrain forcing) is now rejected. Previously the computed one
+  silently won and the supplied file was ignored.
 - **C3 detection limit is now one key.** `evidence.c3.lod` takes `auto`, a
   constant in metres, or a per-cell sigma raster, replacing the former `mode` /
   `threshold` / `sigma_path` / `sigma_scale` block. `auto` is the default and
@@ -72,6 +75,9 @@ Format: `[YYYY-MM-DD] — summary`
 - `config/experiments/exp02_union.yaml` — experiment override: union method
 
 ### Changed
+- A config that both computes and supplies the same quantity (the stable
+  mask, or terrain forcing) is now rejected. Previously the computed one
+  silently won and the supplied file was ignored.
 - `compute_dg_lod.py`: replaced percentile method with NMAD (fixes mismatch with actual LoD used)
 - `config/source_zones.yaml`: renamed `dg_lod_percentile` → `dg_lod_method: nmad`; added `dem_pre` input and `ceff:` section
 
@@ -86,6 +92,9 @@ Format: `[YYYY-MM-DD] — summary`
 - `src/pci_source_zones/ml/unet_classify_workflow.py` — modular classify workflow
 
 ### Changed
+- A config that both computes and supplies the same quantity (the stable
+  mask, or terrain forcing) is now rejected. Previously the computed one
+  silently won and the supplied file was ignored.
 - `src/pci_source_zones/ml/unet_train.py` — updated training loop
 - `src/pci_source_zones/ml/unet_workflow.py` — updated workflow integration
 - `config/ml_unet.yaml`, `config/ml_random_forest.yaml` — config updates
@@ -95,6 +104,9 @@ Format: `[YYYY-MM-DD] — summary`
 ## [2026-08-04] — FIS notebook updated (G_mean inversion)
 
 ### Changed
+- A config that both computes and supplies the same quantity (the stable
+  mask, or terrain forcing) is now rejected. Previously the computed one
+  silently won and the supplied file was ignored.
 - `notebooks/FIS_v1.ipynb` — switched from G_star (max) to G_mean (mean per 10m block)
   per Erkan's feedback; Gamma CDF plot now correctly shows terrain distribution (P→1),
   not empirical Pr; C_eff inversion uses p_obs_union directly

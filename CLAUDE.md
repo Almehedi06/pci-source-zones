@@ -34,6 +34,11 @@ needs — at `validate` and again at the top of `run`, reporting every problem a
 once. It only reads; fixing belongs to `prep` or upstream. Keep it that way, or
 it becomes a second data-preparation tool.
 
+**A quantity has exactly one source.** The stable mask and terrain forcing can
+each be computed here or supplied as an input — both routes stay open, but a
+config that gives both is rejected. When both are set the stage output silently
+wins and the supplied file is ignored without a word.
+
 **A new site is a config file, never a code change.** If you find yourself
 editing a module to onboard a fire, the config schema is missing a key.
 

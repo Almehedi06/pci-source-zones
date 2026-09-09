@@ -34,7 +34,7 @@ inputs:
   # g_pre: /path/to/G_pre.tif         # terrain forcing, pre-event
   # delta_g: /path/to/DeltaG.tif      # change in terrain forcing
 
-  stable_cells: /path/to/stable.tif   # or let the `stable` stage build it
+  stable_cells: /path/to/stable.tif   # OR a `stable:` section below — not both
   dem: /path/to/dem.tif               # needed if ceff.elev_min is set
   aoi: null                           # optional polygon clip
   dz_nodata: null                     # override the dz file's declared nodata

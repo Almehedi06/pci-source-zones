@@ -202,3 +202,32 @@ def test_as_dict_includes_block_size():
     d = cfg().as_dict()
     assert d["grid"]["block_size"] == 10
     assert "source_path" not in d
+
+
+# ───────────────────────────────────── a quantity has exactly one source
+
+def test_stable_configured_twice_is_rejected():
+    """Computed or supplied, never both — the computed one would silently win."""
+    with pytest.raises(ConfigError, match="stable ground is configured twice"):
+        cfg(inputs={"mode": "single", "dz": "z.tif", "g_pre": "g.tif",
+                    "delta_g": "d.tif", "stable_cells": "s.tif"},
+            stable={"layers": [{"name": "slope", "path": "s.tif", "max": 30}]})
+
+
+def test_g_configured_twice_is_rejected():
+    with pytest.raises(ConfigError, match="terrain forcing is configured twice"):
+        cfg(inputs={"mode": "single", "dz": "z.tif",
+                    "dem_pre": "a.tif", "dem_post": "b.tif",
+                    "g_pre": "g.tif", "delta_g": "d.tif"})
+
+
+def test_either_source_alone_is_fine():
+    """Built directly, not merged onto MINIMAL, so each config has one source."""
+    base = {"site": "t", "outputs": {"root": "/out"}}
+    a = SiteConfig.parse({**base, "inputs": {
+        "mode": "single", "dz": "z.tif", "dem_pre": "a.tif", "dem_post": "b.tif"}})
+    b = SiteConfig.parse({**base, "inputs": {
+        "mode": "single", "dz": "z.tif", "g_pre": "g.tif", "delta_g": "d.tif",
+        "stable_cells": "s.tif"}})
+    assert a.inputs.dem_pre and not a.inputs.g_pre
+    assert b.inputs.g_pre and not b.inputs.dem_pre
