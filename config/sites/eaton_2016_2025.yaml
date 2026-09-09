@@ -1,0 +1,78 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Eaton Fire (Jan 2025), Altadena / San Gabriel front, CA.
+# Canonical site/event config for the evidence pipeline.
+#
+# Inputs are three 1 m EPSG:32611 rasters on one grid (18000 x 12000):
+# a Nuth & Kaeaeb-aligned prefire DTM, a postfire DTM, and their difference.
+#
+#   pci_zones.py run --config config/sites/eaton_2016_2025.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+
+site: eaton
+
+epochs:
+  pre: 2016
+  post: 2025
+
+grid:
+  fine_res_m: 1.0
+  coarse_res_m: 10.0
+  crs: EPSG:32611
+
+inputs:
+  mode: single
+  dem_pre:  /mnt/c/Users/amehedi/Downloads/eaton/Pre DEMs/dtm_eaton_alignedNK_1m_PREFIRE.tif
+  dem_post: /mnt/c/Users/amehedi/Downloads/eaton/Post DEMs/dtm_eaton_epsg32611_geoid12b_1m_POSTFIRE.tif
+  dz:       /mnt/c/Users/amehedi/Downloads/eaton/difference_dtm_eaton_2025_2016_aligned_1m_cog.tif
+  dem:      /mnt/c/Users/amehedi/Downloads/eaton/Pre DEMs/dtm_eaton_alignedNK_1m_PREFIRE.tif
+  aoi:      /mnt/c/Users/amehedi/Downloads/eaton/eat2025-perimeter.shp
+
+outputs:
+  root: /mnt/c/Users/amehedi/Downloads/eaton/source_zone_outputs/pipeline
+
+terrain:
+  alpha: 1.167
+  fill_sinks: true
+  curvature: true
+  # 216 M cells: the router writes several DEM-sized intermediates. Keep them on
+  # local disk, not the /mnt/c 9p mount, or the run is dominated by file I/O.
+  work_dir: /var/tmp/eaton_terrain_work
+
+stable:
+  # Independent of the change signal: unburned ground, off the steep slopes and
+  # out of the channels. Deliberately NOT the old |dz| < 0.5 / |dG| < 3 rule,
+  # which calibrates the detection threshold on the small-residual tail of the
+  # very signals it is meant to describe.
+  method: criteria
+  combine: all
+  min_frac: 0.02
+  layers:
+    - {name: burned,  path: /mnt/c/Users/amehedi/Downloads/eaton/eat2025-perimeter.shp, invert: true}
+    - {name: slope,   path: /mnt/c/Users/amehedi/Downloads/eaton/source_zone_outputs/pipeline/S_pre.tif, max: 0.577}   # 30 deg in m/m
+    - {name: channel, path: /mnt/c/Users/amehedi/Downloads/eaton/source_zone_outputs/pipeline/G_pre.tif, max: 300.0}
+
+lod:
+  method: nmad
+  scale: 2.0
+  exclude_channels: false
+
+evidence:
+  apply_domain: true
+  c3:
+    lod: auto                # raw difference: measure the LoD on stable ground
+    scale: 2.0
+  domain:
+    g_min: 5.0
+    g_channel: 300.0
+    # Altadena burned: 2016->2025 elevation loss in the developed area is
+    # structure demolition and debris removal, not erosion. The floor is the
+    # blunt instrument that keeps it out of the Gamma fit.
+    elev_min: 600.0
+
+ceff:
+  p_obs_methods: [intersection, union]
+  elev_min: 600.0
+  elev_filter_outputs: true
+  g_hillslope_max: 300.0
+  p_ceiling: 0.05
+  min_domain_cells: 100

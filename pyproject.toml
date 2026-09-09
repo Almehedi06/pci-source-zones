@@ -15,12 +15,17 @@ dependencies = [
   "geopandas>=0.14",
   "shapely>=2.0",
   "pyproj>=3.6",
-  "landlab>=2.8",
+  "scipy>=1.10",      # Gamma fit and inversion in evidence/core.py
+  "whitebox>=2.3",    # D-infinity flow routing in physics/terrain.py
 ]
+
+[project.scripts]
+pci-zones = "pci_source_zones.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
 ml = ["pandas>=2.0", "scikit-learn>=1.3", "joblib>=1.3", "pydantic>=2.0"]
+dl = ["torch>=2.0"]
 tune = ["optuna>=3.0"]
 xgb = ["xgboost>=2.0"]
 
@@ -32,3 +37,5 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# so `pytest` works from a clean checkout without an editable install
+pythonpath = ["src"]

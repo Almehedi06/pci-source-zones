@@ -1,0 +1,50 @@
+# Montecito, CA — Thomas Fire (Dec 2017), debris flow 9 Jan 2018.
+# Migrated from the pre-refactor source-zones config to the canonical schema.
+site: montecito
+
+epochs:
+  pre: 2016
+  post: 2018
+  fire: 2017-12-04
+  event: 2018-01-09
+
+grid:
+  fine_res_m: 1.0
+  coarse_res_m: 10.0
+
+inputs:
+  mode: single
+  g_pre:        /mnt/c/Users/amehedi/Downloads/thomas/G_1m_dinf_delta/G_pre_dinf.tif
+  delta_g:      /mnt/c/Users/amehedi/Downloads/thomas/G_1m_dinf_delta/DeltaG_1m_dinf.tif
+  dz:           /mnt/c/Users/amehedi/Downloads/LoD_filtered_dDEM/dDEM_LoD95_filtered_change.tif
+  stable_cells: /mnt/c/Users/amehedi/Downloads/Thomas_xDEM/final_stable_cells.tif
+  dem:          /mnt/c/Users/amehedi/Downloads/thomas/dem_pre.tif
+  aoi:          /mnt/c/Users/amehedi/Downloads/thomas/aoi/montecito_aoi.shp
+  dz_nodata:    -9999.0
+
+outputs:
+  root: /mnt/c/Users/amehedi/Downloads/source_zone_labels
+
+lod:
+  method: nmad
+  scale: 2.0
+  exclude_channels: false
+
+evidence:
+  apply_domain: true
+  c3:
+    lod: 0                   # dz arrives already LoD-filtered upstream
+  domain:
+    g_min: 5.0
+    g_channel: 300.0
+
+ceff:
+  p_obs_methods: [intersection, union]
+  elev_min: 600.0
+  elev_filter_outputs: true
+  p_ceiling: 0.05
+
+# Predictor rasters onto the reference grid. Runs once per site, before the
+# evidence stages. The 37-layer list lives beside this file to keep it readable;
+# an inline mapping with the same keys works too.
+align: montecito_align.yaml

@@ -1,0 +1,73 @@
+# Eagle Creek, OR — NonDensFilt 2018-2021 analysis areas.
+# One canonical batch config for terrain -> stable -> LoD -> evidence -> p_obs -> C.
+site: eagle_creek
+
+epochs:
+  pre: 2018
+  post: 2021
+
+grid:
+  fine_res_m: 1.0
+  coarse_res_m: 10.0
+
+inputs:
+  mode: batch
+  roots:
+    dem_pre:  /mnt/c/Users/amehedi/Downloads/eagle_creek/NonDensFilt/2018_2021/Final Pre
+    dem_post: /mnt/c/Users/amehedi/Downloads/eagle_creek/NonDensFilt/2018_2021/Final Post
+    dz:       /mnt/c/Users/amehedi/Downloads/eagle_creek/NonDensFilt/2018_2021/DoD
+    dem:      /mnt/c/Users/amehedi/Downloads/eagle_creek/NonDensFilt/2018_2021/Final Pre
+  templates:
+    dem_pre:  "{id}_Pre.tif"
+    dem_post: "{id}_Post.tif"
+    dz:       "{id}_DoD.tif"
+    dem:      "{id}_Pre.tif"
+
+outputs:
+  root: /mnt/c/Users/amehedi/Downloads/eagle_creek/source_zone_pipeline_2018_2021
+  layout: "{id}"
+
+terrain:
+  alpha: 1.167
+  fill_sinks: true
+  curvature: false
+  work_dir: /var/tmp/eagle_creek_2018_2021_terrain_work
+
+stable:
+  method: criteria
+  combine: all
+  min_frac: 0.02
+  layers:
+    - name: low_g
+      path: "/mnt/c/Users/amehedi/Downloads/eagle_creek/source_zone_pipeline_2018_2021/{id}/G_pre.tif"
+      max: 5.0
+    - name: elev_floor
+      path: "/mnt/c/Users/amehedi/Downloads/eagle_creek/NonDensFilt/2018_2021/Final Pre/{id}_Pre.tif"
+      min: 600.0
+
+lod:
+  method: nmad
+  scale: 2.0
+  exclude_channels: false
+
+evidence:
+  apply_domain: true
+  c3:
+    # Raw DoD plus the survey's own per-cell uncertainty raster. Preferred over
+    # the "Detectable DoD" product, which sets sub-LoD cells to nodata and so
+    # loses the difference between "no erosion" and "no data" — those cells
+    # carry real information and must reach p_obs as zeros.
+    lod: /mnt/c/Users/amehedi/Downloads/eagle_creek/NonDensFilt/2018_2021/Final uncertainty/{id}_Uncertainty.tif
+    scale: 1.96
+  domain:
+    g_min: 5.0
+    g_channel: 300.0
+    elev_min: 600.0
+
+ceff:
+  p_obs_methods: [intersection, union]
+  elev_min: 600.0
+  elev_filter_outputs: true
+  g_hillslope_max: 300.0
+  p_ceiling: 0.05
+  min_domain_cells: 100
