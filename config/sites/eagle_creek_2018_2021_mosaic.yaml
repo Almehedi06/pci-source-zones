@@ -1,0 +1,78 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Eagle Creek Fire (Sept 2017), Columbia River Gorge, OR.
+# Whole-fire 2018/2021 mosaic — distinct from eagle_creek_2018_2021.yaml, which
+# is the per-watershed NonDensFilt batch.
+#
+# Inputs come from prep/01_prepare_grids.sh, which puts the three delivered
+# rasters on one 2 m square grid with real nodata. They cannot be used as
+# delivered: three different grids, non-square pixels, two undeclared fills.
+#
+#   pci-zones validate --config config/sites/eagle_creek_2018_2021_mosaic.yaml
+#   pci-zones run      --config config/sites/eagle_creek_2018_2021_mosaic.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+
+site: eagle_creek_mosaic
+
+epochs:
+  pre: 2018
+  post: 2021
+
+grid:
+  fine_res_m: 2.0            # native y-resolution was 1.88 m; 1 m would invent detail
+  coarse_res_m: 10.0         # block factor 5
+  crs: EPSG:6806             # NAD83(2011) / Oregon Columbia River East (metres)
+
+inputs:
+  mode: single
+  dem_pre:  /mnt/c/Users/amehedi/Downloads/eagle_creek/prep/dem_pre_2m.tif
+  dem_post: /mnt/c/Users/amehedi/Downloads/eagle_creek/prep/dem_post_2m.tif
+  dz:       /mnt/c/Users/amehedi/Downloads/eagle_creek/prep/dz_2m.tif
+  dem:      /mnt/c/Users/amehedi/Downloads/eagle_creek/prep/dem_pre_2m.tif
+  # Clips the coarse outputs to the burn perimeter. The DEMs are deliberately
+  # NOT clipped: flow accumulation needs upslope area from outside the fire.
+  aoi:      /mnt/c/Users/amehedi/Downloads/eagle_creek/eaglecreek.shp
+
+outputs:
+  root: /mnt/c/Users/amehedi/Downloads/eagle_creek/source_zone_pipeline_mosaic
+
+terrain:
+  alpha: 1.167
+  fill_sinks: true
+  curvature: false
+  # ~358 M cells: keep the router's DEM-sized scratch off the /mnt/c mount
+  work_dir: /var/tmp/eagle_creek_mosaic_work
+
+stable:
+  # Independent of the change signal: unburned ground, off the steep slopes,
+  # out of the channels. Slope and G come from the terrain stage, which runs first.
+  method: criteria
+  combine: all
+  min_frac: 0.02
+  layers:
+    - {name: burned,  path: /mnt/c/Users/amehedi/Downloads/eagle_creek/eaglecreek.shp, invert: true}
+    - {name: slope,   path: /mnt/c/Users/amehedi/Downloads/eagle_creek/source_zone_pipeline_mosaic/S_pre.tif, max: 0.577}
+    - {name: channel, path: /mnt/c/Users/amehedi/Downloads/eagle_creek/source_zone_pipeline_mosaic/G_pre.tif, max: 150.0}
+
+evidence:
+  apply_domain: true
+  c3:
+    # Confirmed a raw difference: continuous distribution down to |dz| < 0.005,
+    # no gap at zero. So the detection limit is measured, not assumed.
+    lod: auto
+    scale: 2.0
+  domain:
+    # Specific catchment area scales with cell size, so the 1 m thresholds
+    # (5 / 300) do not transfer to a 2 m grid. Measured on a test window:
+    # G_mean p10 = 5.2, p50 = 25.4, p95 = 89, p99.9 = 141.
+    g_min: 5.0
+    g_channel: 150.0
+    elev_min: null           # no developed-area contamination here
+    slope_max_deg: null
+
+ceff:
+  p_obs_methods: [intersection, union]
+  elev_min: null
+  elev_filter_outputs: false
+  g_hillslope_max: 150.0
+  p_ceiling: 0.05
+  min_domain_cells: 100
