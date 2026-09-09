@@ -6,8 +6,8 @@ from typing import Any
 
 import numpy as np
 
-from .config import load_config, output_path
-from .inputs import InputProvider, read_raster, write_raster
+from ..config import load_config, output_path
+from ..inputs import InputProvider, read_raster, write_raster
 from .monte_carlo import compute_pci_monte_carlo
 from .polygons import extract_source_polygons
 from .terrain import prepare_terrain
@@ -75,7 +75,7 @@ def run_all(config_path: str | Path) -> dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Run PCI source-zone workflow.")
-    parser.add_argument("--config", default="config/montecito.yaml")
+    parser.add_argument("--config", default="config/legacy/montecito_physics.yaml")
     args = parser.parse_args(argv)
     result = run_all(args.config)
     print(result)

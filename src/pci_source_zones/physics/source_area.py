@@ -11,8 +11,8 @@ from rasterio.features import shapes
 from shapely.geometry import shape
 
 from .c_model import modeled_threshold_c
-from .config import output_path, resolve_path
-from .inputs import InputProvider, read_raster, write_raster
+from ..config import output_path, resolve_path
+from ..inputs import InputProvider, read_raster, write_raster
 from .terrain import prepare_terrain
 
 

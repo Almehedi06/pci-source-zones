@@ -5,7 +5,7 @@ from typing import Any
 import numpy as np
 
 from .c_model import modeled_threshold_c
-from .inputs import InputProvider
+from ..inputs import InputProvider
 from .pci import pci_from_exceedance_count
 
 

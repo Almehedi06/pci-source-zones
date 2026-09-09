@@ -7,14 +7,14 @@ from _bootstrap import add_src_to_path
 add_src_to_path()
 
 from pci_source_zones.config import load_config  # noqa: E402
-from pci_source_zones.source_area import run_source_area_workflow  # noqa: E402
+from pci_source_zones.physics.source_area import run_source_area_workflow  # noqa: E402
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Create source candidate rasters and polygons."
     )
-    parser.add_argument("--config", default="config/montecito.yaml")
+    parser.add_argument("--config", default="config/legacy/montecito_physics.yaml")
     args = parser.parse_args()
 
     result = run_source_area_workflow(load_config(args.config))
