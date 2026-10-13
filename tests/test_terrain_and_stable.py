@@ -1,6 +1,8 @@
 """Terrain (G, DeltaG) and stable-ground stages."""
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 import rasterio
@@ -93,6 +95,32 @@ def test_incision_lowers_g_where_the_gully_deepens(tmp_path):
         dg = src.read(1)
         dg = np.where(dg == src.nodata, np.nan, dg)
     assert np.nanstd(dg) > 0, "DeltaG is constant — the DEM pair produced no signal"
+
+
+def test_curvature_writes_pre_post_and_delta(tmp_path):
+    """dCurv is a product of this package, so nothing downstream recomputes it."""
+    pre, post, _, _ = _dem_pair(tmp_path)
+    out = terrain_deltas(pre, post, tmp_path / "out", TerrainParams(curvature=True))
+    for key in ("curvature_pre", "curvature_post", "delta_c"):
+        assert Path(out[key]).exists(), key
+
+    with rasterio.open(out["delta_c"]) as src:
+        dc = src.read(1)
+        dc = np.where(dc == src.nodata, np.nan, dc)
+    with rasterio.open(out["curvature_pre"]) as src:
+        c_pre = src.read(1)
+    with rasterio.open(out["curvature_post"]) as src:
+        c_post = src.read(1)
+    finite = np.isfinite(dc) & np.isfinite(c_pre) & np.isfinite(c_post)
+    assert np.allclose(dc[finite], (c_post - c_pre)[finite], equal_nan=True)
+    assert np.isfinite(out["mean_delta_c"])
+
+
+def test_curvature_rejects_mismatched_grids(tmp_path):
+    pre, _, _, _ = _dem_pair(tmp_path)
+    small = _raster(tmp_path / "small_c.tif", np.ones((20, 20), dtype="float32"))
+    with pytest.raises(ValueError, match="different"):
+        terrain_deltas(pre, small, tmp_path / "out", TerrainParams(curvature=True))
 
 
 def test_mismatched_dem_grids_rejected(tmp_path):

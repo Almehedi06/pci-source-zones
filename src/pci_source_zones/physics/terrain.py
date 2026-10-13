@@ -119,6 +119,33 @@ def plan_curvature(dem_path: str | Path, out_dir: str | Path,
     return read_float(path)
 
 
+def curvature_deltas(dem_pre: str | Path, dem_post: str | Path,
+                     out_dir: str | Path) -> dict[str, Any]:
+    """Plan curvature for both epochs and their difference, DeltaC.
+
+    Separate from `terrain_deltas` because curvature is a surface derivative and
+    needs no flow routing: asking for dCurv should not cost a G computation.
+    This is the only place dCurv is made — nothing downstream recomputes it.
+    """
+    out_dir = Path(out_dir)
+    c_pre, c_profile = plan_curvature(dem_pre, out_dir, "pre")
+    c_post, _ = plan_curvature(dem_post, out_dir, "post")
+    if c_post.shape != c_pre.shape:
+        raise ValueError(
+            f"pre/post DEMs give different curvature grids: {c_pre.shape} vs {c_post.shape}. "
+            "Put both epochs on one grid before computing DeltaC.")
+
+    delta_c = c_post - c_pre
+    write_float(out_dir / "DeltaC.tif", delta_c, c_profile)
+    print(f"  DeltaC: mean={np.nanmean(delta_c):.4f}  n_valid={int(np.isfinite(delta_c).sum())}")
+    return {
+        "curvature_pre": str(out_dir / "curvature_pre.tif"),
+        "curvature_post": str(out_dir / "curvature_post.tif"),
+        "delta_c": str(out_dir / "DeltaC.tif"),
+        "mean_delta_c": float(np.nanmean(delta_c)),
+    }
+
+
 def terrain_deltas(dem_pre: str | Path, dem_post: str | Path,
                    out_dir: str | Path,
                    params: TerrainParams | None = None) -> dict[str, Any]:
@@ -151,10 +178,7 @@ def terrain_deltas(dem_pre: str | Path, dem_post: str | Path,
     }
 
     if params.curvature:
-        c_pre, c_profile = plan_curvature(dem_pre, out_dir, "pre")
-        c_post, _ = plan_curvature(dem_post, out_dir, "post")
-        write_float(out_dir / "DeltaC.tif", c_post - c_pre, c_profile)
-        out["delta_c"] = str(out_dir / "DeltaC.tif")
+        out.update(curvature_deltas(dem_pre, dem_post, out_dir))
     return out
 
 
