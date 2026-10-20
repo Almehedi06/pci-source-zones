@@ -28,9 +28,17 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from scipy.ndimage import binary_erosion
 
+from .. import checks
 from ..config import output_path, resolve_path
 from ..raster import read_float, write_float
+
+# A 3x3 derivative is undefined beside nodata, so that ring is dropped from
+# every product. One cell covers Horn's slope window; the sanity check below
+# catches anything the router leaks further than that.
+NODATA_BUFFER_CELLS = 1
+SLOPE_MAX = 100.0   # m/m. No DTM holds a steeper cell; only a leaked sentinel does.
 
 
 @dataclass
@@ -60,16 +68,44 @@ def _whitebox():
     return wbt
 
 
+def valid_cells(dem_path: str | Path) -> np.ndarray:
+    """True where the DEM has ground. The one source of nodata for every product."""
+    dem, _ = read_float(dem_path)
+    return np.isfinite(dem)
+
+
+def restore_nodata(path: str | Path, valid: np.ndarray) -> None:
+    """Put the DEM's nodata back into a WhiteboxTools product.
+
+    The depression filler writes its own sentinel (-2147483647) into nodata holes
+    while still declaring the source nodata value, so the holes read as ground
+    2e9 m deep and every derivative beside them is garbage. Anything the router
+    produced where the DEM had no ground is nodata again.
+    """
+    arr, profile = read_float(path)
+    arr[~valid] = np.nan
+    write_float(path, arr, profile)
+
+
+def mask_edges(arr: np.ndarray, valid: np.ndarray,
+               cells: int = NODATA_BUFFER_CELLS) -> np.ndarray:
+    """NaN outside the DEM and in the `cells`-wide ring beside its nodata."""
+    keep = binary_erosion(valid, iterations=cells, border_value=0)
+    return np.where(keep, arr, np.nan)
+
+
 def route(dem_path: str | Path, work_dir: str | Path, tag: str,
           fill_sinks: bool = True) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
     """Fill, then derive slope (m/m) and specific catchment area (m) by D-infinity."""
     dem_path, work_dir = Path(dem_path), Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
     wbt = _whitebox()
+    valid = valid_cells(dem_path)
 
     routed = work_dir / f"{tag}_filled.tif"
     if fill_sinks:
         wbt.fill_depressions_wang_and_liu(str(dem_path), str(routed), fix_flats=True)
+        restore_nodata(routed, valid)
     else:
         routed = dem_path
 
@@ -80,7 +116,15 @@ def route(dem_path: str | Path, work_dir: str | Path, tag: str,
 
     s_pct, profile = read_float(slope_pct)
     sca, _ = read_float(sca_path)
-    return s_pct / 100.0, sca, profile
+    slope = mask_edges(s_pct, valid) / 100.0
+    sca = mask_edges(sca, valid)
+
+    leaked = np.isfinite(slope) & (slope > SLOPE_MAX)
+    if leaked.any():
+        raise checks.InvariantError(
+            f"{int(leaked.sum())} cells have slope > {SLOPE_MAX:g} m/m after routing {dem_path}: "
+            "the router's nodata sentinel leaked into the derivatives")
+    return slope, sca, profile
 
 
 def driving_index(sca: np.ndarray, slope: np.ndarray, alpha: float) -> np.ndarray:
@@ -116,7 +160,10 @@ def plan_curvature(dem_path: str | Path, out_dir: str | Path,
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"curvature_{tag}.tif"
     _whitebox().plan_curvature(str(dem_path), str(path))
-    return read_float(path)
+    curv, profile = read_float(path)
+    curv = mask_edges(curv, valid_cells(dem_path))
+    write_float(path, curv, profile)
+    return curv, profile
 
 
 def curvature_deltas(dem_pre: str | Path, dem_post: str | Path,

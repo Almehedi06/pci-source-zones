@@ -78,6 +78,29 @@ def test_bad_alpha_rejected():
 
 # ────────────────────────────────────────────── terrain_deltas
 
+def test_route_keeps_nodata_holes_out_of_every_product(tmp_path):
+    """WhiteboxTools fills nodata holes with its own sentinel; before the fix the
+    slope beside a hole came out around 1e8 m/m and G followed."""
+    from scipy.ndimage import binary_dilation
+
+    from pci_source_zones.physics.terrain import route
+
+    yy, xx = np.mgrid[0:80, 0:80].astype("float64")
+    dem = 100.0 - 0.30 * yy + 2.0 * np.sin(xx / 4.0)
+    dem[30:45, 30:50] = -9999.0          # an interior hole, as in a real survey
+    dem[:, :6] = -9999.0                  # and a ragged edge
+    hole = dem == -9999.0
+
+    slope, sca, _ = route(_raster(tmp_path / "dem.tif", dem), tmp_path / "work", "t")
+
+    ring = binary_dilation(hole, iterations=1)
+    assert np.isnan(slope[ring]).all() and np.isnan(sca[ring]).all()
+    far = ~binary_dilation(hole, iterations=3)
+    far[:2, :] = far[-2:, :] = far[:, -2:] = False      # the raster border is undefined too
+    assert np.isfinite(slope[far]).all() and np.isfinite(sca[far]).all()
+    assert np.nanmax(slope) < 1.0, "a 17-degree surface; anything steeper is a leaked sentinel"
+
+
 def test_terrain_deltas_writes_products(tmp_path):
     pre, post, _, _ = _dem_pair(tmp_path)
     out = terrain_deltas(pre, post, tmp_path / "out", TerrainParams())

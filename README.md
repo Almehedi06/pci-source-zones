@@ -162,6 +162,6 @@ Synthetic rasters only — no site data, no network. CI runs on every push.
 ## Data acquisition
 
 Not in this repo. Fetching, reprojection and harmonisation live upstream in
-`landslide-data-prep`; this repo consumes analysis-ready rasters. Acquisition
+`landlab_data_prep` (https://github.com/gaia-hazlab/landlab_data_prep); this repo consumes analysis-ready rasters. Acquisition
 code previously here is staged in `../pci-source-zones_bin/` pending that
 integration.

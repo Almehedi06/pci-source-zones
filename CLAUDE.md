@@ -85,9 +85,6 @@ site-specific number wearing a default's clothing.
   `invert_threshold` then uses that `k` as the shape of the threshold
   distribution *within* a cell. The algebra is right, the identification is an
   assumption. Weakest link in the evidence track.
-- WhiteboxTools writes its own nodata sentinel while declaring the source
-  nodata, so DEMs with nodata holes produce contaminated G. Deferred by
-  decision — do not run sites with nodata gaps until it is addressed.
 - The new pipeline has not been diffed against the retired `compute_*.py`
   outputs on Montecito.
 - `ml/` does not use `SiteConfig`; it still has its own config world.

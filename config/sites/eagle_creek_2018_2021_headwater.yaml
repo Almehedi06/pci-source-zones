@@ -1,0 +1,74 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Eagle Creek Fire — headwater cells on the 2018/2021 mosaic.
+#
+# Not a change-detection run: it reuses the terrain products of
+# eagle_creek_2018_2021_mosaic.yaml (run its `terrain` stage first) and only
+# builds criteria masks with the `stable` stage. Same rules as
+# eagle_creek_2018_2021_hillslope.yaml plus one: plan curvature < 0, i.e. the
+# convergent hollows of those hillslopes (zero-order basins above channel heads).
+#
+#   stable_cells.tif      headwater cells (all rules below)
+#   stable_<name>.tif     one raster per rule, so each cut can be inspected
+#
+# curvature_pre.tif is WhiteboxTools plan curvature on the pre-fire DEM, written
+# by physics.terrain.plan_curvature (nodata ring removed). Negative = convergent:
+# checked on this grid, 78% of channel cells are negative, 11% of ridge cells.
+# Its extreme values (|c| > 10) all sit on flat ground, which `steep` removes.
+#
+# Thresholds are for the 2 m grid: specific catchment area scales with cell
+# size, so the 1 m values (channel G > 200) do not transfer.
+#
+#   pci-zones validate --config config/sites/eagle_creek_2018_2021_headwater.yaml
+#   pci-zones run      --config config/sites/eagle_creek_2018_2021_headwater.yaml --stages stable
+# ─────────────────────────────────────────────────────────────────────────────
+
+site: eagle_creek_headwater
+
+epochs:
+  pre: 2018
+  post: 2021
+
+grid:
+  fine_res_m: 2.0
+  coarse_res_m: 10.0
+  crs: EPSG:6806
+
+inputs:
+  mode: single
+  g_pre:   /mnt/c/Users/amehedi/Downloads/eagle_creek/source_zone_pipeline_mosaic/G_pre.tif
+  delta_g: /mnt/c/Users/amehedi/Downloads/eagle_creek/source_zone_pipeline_mosaic/DeltaG.tif
+  dz:      /mnt/c/Users/amehedi/Downloads/eagle_creek/prep/dz_2m.tif
+  dem:     /mnt/c/Users/amehedi/Downloads/eagle_creek/prep/dem_pre_2m.tif
+  aoi:     /mnt/c/Users/amehedi/Downloads/eagle_creek/eaglecreek.shp
+
+outputs:
+  root: /mnt/c/Users/amehedi/Downloads/eagle_creek/headwater_mask_2018_2021
+
+# Same hillslope domain as the mosaic run, so the two never drift apart.
+# Only `stable` runs here; this block keeps `validate` honest about the domain.
+evidence:
+  apply_domain: true
+  c3:
+    lod: auto
+    scale: 2.0
+  domain:
+    g_min: 5.0
+    g_channel: 150.0
+    elev_min: 100.0
+    slope_max_deg: null
+
+stable:
+  method: criteria
+  combine: all
+  min_frac: 0.02
+  layers:
+    # steep enough: slope >= 17 degrees (tan 0.306); drops flats, terraces, floodplain
+    - {name: steep,     path: /mnt/c/Users/amehedi/Downloads/eagle_creek/source_zone_pipeline_mosaic/S_pre.tif, min: 0.306}
+    # off the drainage network, but with something draining in: 5 <= G < 150 on the 2 m grid
+    - {name: hillslope_g, path: /mnt/c/Users/amehedi/Downloads/eagle_creek/source_zone_pipeline_mosaic/G_pre.tif, min: 5.0, max: 150.0}
+    # above the river and the valley floor
+    - {name: above_river, path: /mnt/c/Users/amehedi/Downloads/eagle_creek/prep/dem_pre_2m.tif, min: 100.0}
+    # inside the mapped area
+    - {name: aoi,       path: /mnt/c/Users/amehedi/Downloads/eagle_creek/eaglecreek.shp}
+    # convergent: plan curvature < 0
+    - {name: convergent, path: /mnt/c/Users/amehedi/Downloads/eagle_creek/source_zone_pipeline_mosaic/curvature_pre.tif, max: 0.0}
