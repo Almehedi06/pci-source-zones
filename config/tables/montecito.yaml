@@ -1,0 +1,49 @@
+# Montecito (Thomas Fire) ML table: one row per 10 m cell of the aligned stack.
+#   pci-zones table --config config/tables/montecito.yaml
+#
+# Features are the fifteen the published Montecito models use, from the same files, so a
+# model trained from this table reproduces the raster-path scores. Units are stated as they
+# are after `scale`; definitions say how the number was made, which is what the ML side
+# compares between sites.
+site: montecito
+description: Thomas Fire, Montecito, 10 m; target from 2016-2018 repeat lidar.
+data_dir: /mnt/c/Users/amehedi/Downloads/thomas/aligned
+extent: elevation_aligned.tif
+output: /mnt/c/Users/amehedi/Downloads/ml_tables/montecito.parquet
+
+features:
+  G:              {path: /mnt/c/Users/amehedi/Downloads/G_topographic_driving_index.tif, units: m,
+                   definition: "G = a S^(7/6), Landlab terrain on the 10 m DEM", source: G_topographic_driving_index.tif}
+  slope:          {path: slope_aligned.tif, units: m/m, valid_range: [0, 20],
+                   definition: "slope, Landlab terrain on the 10 m DEM", source: S_from_topographic_elevation.tif}
+  drainage_area:  {path: drainage_area_aligned.tif, units: m2, scale: 10.0,
+                   definition: "upslope contributing area = specific contributing area x cell width, Landlab on the 10 m DEM",
+                   source: topographic__specific_contributing_area.tif (m) x 10 m}
+  curvature:      {path: curvature_aligned.tif, units: 1/m,
+                   definition: "Landlab topographic__curvature on the 10 m DEM", source: topographic__curvature.tif}
+  aspect:         {path: aspect_aligned.tif, units: degrees, valid_range: [0, 360],
+                   definition: "Landlab topographic__aspect on the 10 m DEM", source: topographic__aspect.tif}
+  elevation:      {path: elevation_aligned.tif, units: m, definition: "ground elevation", source: topographic__elevation.tif}
+  dnbr:           {path: dnbr_aligned.tif, units: dNBR x 1000, definition: "differenced normalized burn ratio x 1000"}
+  et_diff:        {path: et_diff_aligned.tif, units: as delivered (unverified), definition: "evapotranspiration post minus pre"}
+  ndvi_diff:      {path: ndvi_diff_aligned.tif, units: "-", valid_range: [-2, 2], definition: "NDVI post-fire minus pre-fire"}
+  soil_thickness: {path: soil_thickness_aligned.tif, units: m, scale: 0.01, valid_range: [0, 5],
+                   definition: "depth to bedrock or lithic contact", source: SOLUS100 anylithicdpt (cm)}
+  sand_total:     {path: sand_total_aligned.tif, units: "%", valid_range: [0, 100], definition: "sand fraction, topsoil", source: SOLUS100}
+  silt_total:     {path: silt_total_aligned.tif, units: "%", valid_range: [0, 100], definition: "silt fraction, topsoil", source: SOLUS100}
+  ksat:           {path: ksat_aligned.tif, units: m/day, valid_range: [0, 100],
+                   definition: "saturated hydraulic conductivity, landlab_data_prep pedotransfer from pH, clay, silt and CEC"}
+  ph:             {path: ph_aligned.tif, units: pH, scale: 0.01, valid_range: [3, 10],
+                   definition: "soil pH, 1:1 water, topsoil", source: SOLUS100 ph1to1h2o (pH x 100)}
+  precip_jan9:    {path: precip_jan9_aligned.tif, units: mm/day, valid_range: [0, 1000],
+                   definition: "rainfall on 9 January 2018, the triggering storm day"}
+
+labels:
+  p_obs_union:    {raster: p_obs_union_aligned.tif, kind: continuous, valid_range: [0, 1],
+                   description: "observed erosion probability, C2 or C3 evidence, from the lidar dDEM"}
+  erosion_t010:   {raster: target_binary_t010.tif, kind: binary,
+                   description: "the published binary target (p_obs above 0.10)"}
+
+splits:
+  official:       {polygons: /mnt/c/Users/amehedi/Downloads/train_test_poly1.gpkg, id_field: id,
+                   assign: {train: [1, 2, 3, 4, 5, 6], test: [7, 8], holdout: [9, 10, 11]}}

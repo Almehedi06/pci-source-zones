@@ -45,6 +45,22 @@ pci-zones run --config config/sites/montecito_2016_2018.yaml \
 `--ids` is the only difference between single-site and batch. Single-site is a
 batch of one, through the same code path.
 
+## ML tables
+
+`table` writes one Parquet file per site: a row per 10 m cell, every feature with its
+units and definition, labels built from rasters, polygons or points, and official splits.
+It is the only file the ML repository (`debrisflow-source-ml`) reads.
+
+```bash
+pci-zones table --config config/tables/montecito.yaml
+pci-zones table --config config/tables/eagle_creek.yaml
+```
+
+Everything that decides what a number means is decided here, once: units (with `scale`
+and a `valid_range` that catches centimetres declared as metres), how points and polygons
+become labels, and whether an unmapped cell is `background` or `unknown`. The config
+format and the mistakes it refuses are in the docstring of `src/pci_source_zones/table.py`.
+
 ## Stages
 
 | Stage | Produces |

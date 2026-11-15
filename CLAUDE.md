@@ -17,7 +17,9 @@ pytest -q
 
 Stages: `align → terrain → stable → lod → evidence → p_obs → ceff`.
 `prep` is a separate command that runs before all of it, only when the delivered
-rasters are not already one square grid with real nodata.
+rasters are not already one square grid with real nodata. `table` runs after it and
+writes the per-site Parquet table the ML repository reads
+(`pci-zones table --config config/tables/<site>.yaml`).
 Real inputs are **pre-DEM, post-DEM, dDEM**; everything else is derived.
 
 ## Conventions that matter
@@ -33,6 +35,13 @@ square pixels, declared nodata and a source for every quantity a requested stage
 needs — at `validate` and again at the top of `run`, reporting every problem at
 once. It only reads; fixing belongs to `prep` or upstream. Keep it that way, or
 it becomes a second data-preparation tool.
+
+**The ML table is the only interface to the ML repository.** What a number means is
+decided in `table.py` and nowhere else: units and definitions for every feature, how
+points or polygons become labels, whether unmapped cells are background or unknown,
+which cells form an official split. The ML side may only choose among them. Units and
+definitions are compared between sites there, so state them honestly; a terrain layer
+built at 2 m and averaged is not the same feature as one built on a 10 m DEM.
 
 **A quantity has exactly one source.** The stable mask and terrain forcing can
 each be computed here or supplied as an input — both routes stay open, but a

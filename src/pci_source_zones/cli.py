@@ -24,6 +24,10 @@ Put delivered rasters on one analysis-ready grid first, if they are not already:
     pci-zones prep --config config/prep/<site>_prep.yaml --scan   # inspect fills
     pci-zones prep --config config/prep/<site>_prep.yaml
 
+Write a site's ML table, the one file the ML repository reads:
+
+    pci-zones table --config config/tables/<site>.yaml
+
 Validate a config without running anything:
 
     pci-zones validate --config config/sites/eaton_2016_2025.yaml
@@ -44,6 +48,8 @@ from .align import AlignError
 from .contract import (ContractError, check_inputs,
                        format_issues)
 from .prep import PrepConfig, PrepError, run_prep
+from .raster import GridMismatch
+from .table import TableConfig, TableError, write_table
 from .geometry import parse_ids
 from .site_config import ConfigError, SiteConfig
 
@@ -111,6 +117,12 @@ def cmd_prep(args) -> int:
     return 0
 
 
+def cmd_table(args) -> int:
+    cfg = TableConfig.load(args.config)
+    write_table(cfg, overwrite=args.overwrite)
+    return 0
+
+
 def cmd_list(args) -> int:
     cfg = load_cfg(args)
     ids = runner.discover_areas(cfg, parse_ids(args.ids))
@@ -158,6 +170,11 @@ def main(argv: list[str] | None = None) -> int:
                     help="report undeclared fill values and write nothing")
     p_.set_defaults(func=cmd_prep)
 
+    t = sub.add_parser("table", help="write a site's ML table (one row per cell)")
+    t.add_argument("--config", required=True, help="table config YAML")
+    t.add_argument("--overwrite", action="store_true", help="replace an existing table")
+    t.set_defaults(func=cmd_table)
+
     l = sub.add_parser("list", help="list the analysis areas a config resolves to")
     add_common(l)
     l.set_defaults(func=cmd_list)
@@ -168,7 +185,7 @@ def main(argv: list[str] | None = None) -> int:
     except ContractError as exc:
         print(f"input contract failed:\n{exc}", file=sys.stderr)
         return 2
-    except (ConfigError, AlignError, PrepError) as exc:
+    except (ConfigError, AlignError, PrepError, TableError, GridMismatch) as exc:
         print(f"config error: {exc}", file=sys.stderr)
         return 2
     except FileNotFoundError as exc:

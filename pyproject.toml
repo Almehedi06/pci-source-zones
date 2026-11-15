@@ -17,6 +17,7 @@ dependencies = [
   "pyproj>=3.6",
   "scipy>=1.10",      # Gamma fit and inversion in evidence/core.py
   "whitebox>=2.3",    # D-infinity flow routing in physics/terrain.py
+  "pyarrow>=14",      # Parquet for the ML tables in table.py
 ]
 
 [project.scripts]
