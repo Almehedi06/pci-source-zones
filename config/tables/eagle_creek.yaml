@@ -29,8 +29,9 @@ features:
   aspect:         {path: aspect_aligned.tif, units: degrees, valid_range: [0, 360],
                    definition: "gdaldem aspect on the 2018 DEM at 10 m", source: prep/aspect_pre_10m.tif}
   elevation:      {path: elevation_aligned.tif, units: m, definition: "ground elevation", source: "2018 lidar DEM, 2 m, mean per 10 m cell"}
-  dnbr:           {path: dnbr_aligned.tif, units: dNBR x 1000, definition: "differenced normalized burn ratio x 1000",
-                   source: BAER (fills masked)}
+  dnbr:           {path: nbr_diff_aligned.tif, units: dNBR x 1000, scale: -1.0,
+                   definition: "differenced normalized burn ratio x 1000",
+                   source: "HLS NBR post minus pre x 1000, sign flipped; BAER dNBR covers only 77 % of the site (mid-fire image)"}
   ndvi_diff:      {path: ndvi_diff_aligned.tif, units: "-", valid_range: [-2, 2], definition: "NDVI post-fire minus pre-fire"}
   soil_thickness: {path: soil_thickness_aligned.tif, units: m, valid_range: [0, 5],
                    definition: "depth to bedrock or lithic contact", source: landlab_data_prep soil__thickness (POLARIS/gNATSGO)}
@@ -41,8 +42,25 @@ features:
   ph:             {path: ph_aligned.tif, units: pH, valid_range: [3, 10], definition: "soil pH, 1:1 water, topsoil", source: landlab_data_prep}
 
 labels:
-  p_obs_union:    {raster: p_obs_union_aligned.tif, kind: continuous, valid_range: [0, 1],
-                   description: "observed erosion probability, C2 or C3 evidence, from the 2018-2021 lidar dDEM"}
+  p_obs_union:
+    raster: p_obs_union_aligned.tif
+    kind: continuous
+    valid_range: [0, 1]
+    definition: "share of 2 m cells with C2 or C3 evidence per 10 m cell, 2018-2021 lidar dDEM (pci-source-zones p_obs stage, mosaic)"
+    description: "observed erosion probability"
+  initiation:
+    polygons: /mnt/c/Users/amehedi/Downloads/eaglecreek_inventory.gpkg
+    layer: inventory
+    where:
+      epoch: "2018_2021"
+      Primary: ["07_DF Pre-Initiation erosion in channel", "08_DF Pre-Initiation rills on slope",
+                "09_DF Initiation - In channel initiation (erosion)", "10_DF Initiation - Road fill embankment (erosion)",
+                "12_DF Initiation - Deep landslide (evacuated)", "14_DF Initiation - Shallow landslide (evacuated)"]
+    kind: binary
+    all_touched: true        # small scars cover no cell centre; keep every mapped initiation
+    outside: background
+    domain: {polygons: /mnt/c/Users/amehedi/Downloads/eaglecreek_inventory.gpkg, layer: mapping_area, where: {epoch: "2018_2021"}}
+    definition: "debris-flow initiation polygons mapped for 2018-2021 (inventory codes 07, 08, 09, 10, 12, 14), every cell a polygon touches; 0 inside the mapping area elsewhere"
   process:
     polygons: /mnt/c/Users/amehedi/Downloads/eaglecreek_inventory.gpkg
     layer: inventory
@@ -51,7 +69,8 @@ labels:
     class_field: Primary
     outside: background
     domain: {polygons: /mnt/c/Users/amehedi/Downloads/eaglecreek_inventory.gpkg, layer: mapping_area, where: {epoch: "2018_2021"}}
-    description: "mapped process, grouped: 1 debris-flow initiation, 2 transport, 3 deposition, 4 other landslide or fall; 0 mapped area, no process"
+    definition: "process polygons mapped for 2018-2021 (eaglecreek_inventory.gpkg), grouped: 1 debris-flow initiation, 2 transport, 3 deposition, 4 other landslide or fall; 0 inside the mapping area with no polygon; partly covered cells unknown"
+    description: "the grouping is a proposal; edit the classes mapping to change it"
     classes:
       "01_Deep landslide (evacuated)": 4
       "02_Deep landslide (deposition)": 4

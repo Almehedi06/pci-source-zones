@@ -45,10 +45,22 @@ features:
                    definition: "rainfall on 9 January 2018, the triggering storm day"}
 
 labels:
-  p_obs_union:    {raster: p_obs_union_aligned.tif, kind: continuous, valid_range: [0, 1],
-                   description: "observed erosion probability, C2 or C3 evidence, from the lidar dDEM"}
-  erosion_t010:   {raster: target_binary_t010.tif, kind: binary,
-                   description: "the published binary target (p_obs above 0.10)"}
+  p_obs_union:
+    raster: p_obs_union_aligned.tif
+    kind: continuous
+    valid_range: [0, 1]
+    definition: "share of 1 m cells with C2 or C3 evidence per 10 m cell, 2016-2018 lidar dDEM (compute_p_obs.py), bilinear-resampled onto the 10 m grid"
+    description: "observed erosion probability"
+  erosion_t010:
+    raster: p_obs_union_aligned.tif
+    kind: binary
+    threshold: 0.10
+    definition: "p_obs_union >= 0.10, where p_obs_union is observed (cells without an observation stay unlabelled)"
+  src_hi_t010:
+    raster: target_binary_t010.tif
+    kind: binary
+    definition: "retired rule-based src_hi mask >= 0.10 (scripts/11_make_binary_label.py from target_src_hi_aligned.tif); every extent cell labelled; not dDEM evidence"
+    description: "the binary target of the published rf_classification run, kept to reproduce it"
 
 splits:
   official:       {polygons: /mnt/c/Users/amehedi/Downloads/train_test_poly1.gpkg, id_field: id,

@@ -36,7 +36,7 @@ labels:
     buffer_cells: 1
     outside: background
     domain: {polygons: /mnt/c/Users/amehedi/Downloads/pioneer_hf/footprint/aoi.gpkg}
-    description: "debris-flow initiation, 3 x 3 cells around each mapped point; 0 elsewhere in the lidar footprint"
+    definition: "USGS-mapped debris-flow initiation points (Rengers and others 2026, doi:10.5066/P1GNNSZU), 3 x 3 cells around each; 0 elsewhere in the lidar footprint"
   initiation_type:
     points: /mnt/c/Users/amehedi/Downloads/pioneer_hf/truth/initiation_points.gpkg
     kind: class
@@ -46,4 +46,4 @@ labels:
     outside: background
     on_overlap: unknown
     domain: {polygons: /mnt/c/Users/amehedi/Downloads/pioneer_hf/footprint/aoi.gpkg}
-    description: "initiation type: 1 landslide, 2 runoff, 3 firehose; 0 elsewhere in the lidar footprint"
+    definition: "USGS-mapped debris-flow initiation points by type (1 landslide, 2 runoff, 3 firehose), 3 x 3 cells around each; 0 elsewhere in the lidar footprint"

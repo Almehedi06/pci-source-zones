@@ -120,13 +120,13 @@ def test_unknown_keys_are_errors(site):
     with pytest.raises(TableError, match="unknown key"):
         _cfg(site, featurs={})
     with pytest.raises(TableError, match="unknown key"):
-        _cfg(site, labels={"p": {"raster": "pobs.tif", "kind": "continuous", "treshold": 0.1}})
+        _cfg(site, labels={"p": {"raster": "pobs.tif", "kind": "continuous", "definition": "test label", "treshold": 0.1}})
 
 
 def test_raster_labels_continuous_and_threshold(site):
     cfg = _cfg(site, labels={
-        "p": {"raster": "pobs.tif", "kind": "continuous", "valid_range": [0, 1]},
-        "eroded": {"raster": "pobs.tif", "kind": "binary", "threshold": 0.5},
+        "p": {"raster": "pobs.tif", "kind": "continuous", "definition": "test label", "valid_range": [0, 1]},
+        "eroded": {"raster": "pobs.tif", "kind": "binary", "definition": "test label", "threshold": 0.5},
     })
     write_table(cfg)
     df, meta = _read(cfg.output)
@@ -139,7 +139,7 @@ def test_raster_labels_continuous_and_threshold(site):
 
 def test_polygon_class_label_with_domain_and_background(site):
     cfg = _cfg(site, labels={"process": {
-        "polygons": "inv.gpkg", "layer": "inventory", "where": {"epoch": "A"}, "kind": "class",
+        "polygons": "inv.gpkg", "layer": "inventory", "where": {"epoch": "A"}, "kind": "class", "definition": "test label",
         "class_field": "Primary", "classes": {"slide": 1, "flow": 2}, "outside": "background",
         "domain": {"polygons": "inv.gpkg", "layer": "mapping_area"}}})
     write_table(cfg)
@@ -159,7 +159,7 @@ def pd_isna(v):
 
 def test_unmapped_class_value_is_an_error(site):
     cfg = _cfg(site, labels={"process": {
-        "polygons": "inv.gpkg", "layer": "inventory", "kind": "class", "class_field": "Primary",
+        "polygons": "inv.gpkg", "layer": "inventory", "kind": "class", "definition": "test label", "class_field": "Primary",
         "classes": {"slide": 1}, "outside": "unknown"}})
     with pytest.raises(TableError, match="no code"):
         write_table(cfg)
@@ -167,13 +167,13 @@ def test_unmapped_class_value_is_an_error(site):
 
 def test_outside_must_be_stated(site):
     with pytest.raises(TableError, match="outside must be stated"):
-        _cfg(site, labels={"x": {"polygons": "inv.gpkg", "kind": "binary"}})
+        _cfg(site, labels={"x": {"polygons": "inv.gpkg", "kind": "binary", "definition": "test label"}})
 
 
 def test_overlapping_classes(site):
     gpd.GeoDataFrame({"Primary": ["a", "b"]}, geometry=[_cell_box(2, 2, 6, 6), _cell_box(4, 4, 8, 8)],
                      crs=CRS).to_file(site / "overlap.gpkg")
-    spec = {"polygons": "overlap.gpkg", "kind": "class", "class_field": "Primary",
+    spec = {"polygons": "overlap.gpkg", "kind": "class", "definition": "test label", "class_field": "Primary",
             "classes": {"a": 1, "b": 2}, "outside": "unknown"}
     with pytest.raises(TableError, match="more than one class"):
         write_table(_cfg(site, labels={"o": spec}))
@@ -185,7 +185,7 @@ def test_overlapping_classes(site):
 
 
 def test_point_labels_with_buffer(site):
-    cfg = _cfg(site, labels={"init": {"points": "pts.gpkg", "kind": "class", "class_field": "FailureTyp",
+    cfg = _cfg(site, labels={"init": {"points": "pts.gpkg", "kind": "class", "definition": "test label", "class_field": "FailureTyp",
                                       "classes": {"LS": 1, "Runoff": 2}, "buffer_cells": 1,
                                       "outside": "unknown"}})
     write_table(cfg)
@@ -197,14 +197,14 @@ def test_point_labels_with_buffer(site):
 
 def test_points_outside_grid_are_an_error(site):
     gpd.GeoDataFrame({"k": [1]}, geometry=[Point(0, 0)], crs=CRS).to_file(site / "far.gpkg")
-    cfg = _cfg(site, labels={"x": {"points": "far.gpkg", "kind": "binary", "outside": "unknown"}})
+    cfg = _cfg(site, labels={"x": {"points": "far.gpkg", "kind": "binary", "definition": "test label", "outside": "unknown"}})
     with pytest.raises(TableError, match="outside the grid"):
         write_table(cfg)
 
 
 def test_label_with_no_positives_is_an_error(site):
     _raster(site / "zeros.tif", np.zeros((H, W)))
-    cfg = _cfg(site, labels={"z": {"raster": "zeros.tif", "kind": "binary"}})
+    cfg = _cfg(site, labels={"z": {"raster": "zeros.tif", "kind": "binary", "definition": "test label"}})
     with pytest.raises(TableError, match="no positive"):
         write_table(cfg)
 
@@ -334,3 +334,84 @@ def test_terrain_reads_a_float_predictor_geotiff(site):
     write_table(TableConfig.from_dict(raw))
     df, _ = _read(site / "p3.parquet")
     assert df.terrain_slope.median() == pytest.approx(0.2, abs=0.01)
+
+
+# ───────────────────────────────────────────── review fixes
+
+def test_partly_covered_cells_and_dropped_classes_are_unknown_not_background(site):
+    # one polygon covers the left half of cell (10, 10) only (centre outside), one is a dropped class
+    half = box(X0 + 10 * RES, Y0 - 11 * RES, X0 + 10.4 * RES, Y0 - 10 * RES)
+    gpd.GeoDataFrame({"Primary": ["slide", "rockfall", "slide"]},
+                     geometry=[_cell_box(2, 2, 5, 5), _cell_box(6, 6, 8, 8), half],
+                     crs=CRS).to_file(site / "partial.gpkg")
+    cfg = _cfg(site, labels={"p": {
+        "polygons": "partial.gpkg", "kind": "class", "class_field": "Primary", "definition": "d",
+        "classes": {"slide": 1, "rockfall": None}, "outside": "background"}})
+    write_table(cfg)
+    df, meta = _read(cfg.output)
+    lab = df.set_index(["row", "col"]).label_p
+    assert lab[(3, 3)] == 1
+    assert pd_isna(lab[(10, 10)])                     # partly covered: unknown, not "no process"
+    assert pd_isna(lab[(6, 6)]) and pd_isna(lab[(7, 7)])   # under the dropped class: unknown
+    assert lab[(15, 15)] == 0                         # untouched mapped area: background
+    info = meta["labels"]["p"]
+    assert info["features_without_cells"] == {"1": 1}  # the half-cell polygon labels nothing
+    assert info["features_mapped"] == 2 and info["features_dropped"] == 1
+
+
+def test_blank_units_or_definition_are_refused(site):
+    raw = {"site": "demo", "extent": str(site / "elev.tif"), "output": str(site / "x.parquet"),
+           "features": {"slope": {"path": str(site / "slope.tif"), "units": None, "definition": "s"}}}
+    with pytest.raises(TableError, match="units is empty"):
+        TableConfig.from_dict(raw)
+    raw["features"]["slope"].update(units="m/m", definition=None)
+    with pytest.raises(TableError, match="definition is empty"):
+        TableConfig.from_dict(raw)
+
+
+def test_labels_need_a_definition(site):
+    with pytest.raises(TableError, match="definition"):
+        _cfg(site, labels={"p": {"raster": "pobs.tif", "kind": "continuous"}})
+
+
+def test_classes_only_on_class_labels(site):
+    with pytest.raises(TableError, match="kind class only"):
+        _cfg(site, labels={"p": {"raster": "pobs.tif", "kind": "binary", "threshold": 0.5,
+                                 "classes": {"0": None, "1": 1}, "definition": "d"}})
+
+
+def test_class_raster_must_be_whole_numbers_and_in_range(site):
+    arr = np.ones((H, W))
+    arr[4, 4] = 1.5
+    _raster(site / "frac.tif", arr)
+    cfg = _cfg(site, labels={"c": {"raster": "frac.tif", "kind": "class", "classes": {"1": 1}, "definition": "d"}})
+    with pytest.raises(TableError, match="whole numbers"):
+        write_table(cfg)
+    arr[4, 4] = 40000
+    _raster(site / "big.tif", arr)
+    cfg = _cfg(site, labels={"c": {"raster": "big.tif", "kind": "class", "definition": "d"}})
+    with pytest.raises(TableError, match="between 0 and 32767"):
+        write_table(cfg)
+    with pytest.raises(TableError, match="between 0 and 32767"):
+        _cfg(site, labels={"c": {"raster": "frac.tif", "kind": "class", "classes": {"1": 40000},
+                                 "definition": "d"}})
+
+
+def test_multi_layer_geopackage_needs_a_layer(site):
+    cfg = _cfg(site, labels={"p": {"polygons": "inv.gpkg", "kind": "class", "class_field": "Primary",
+                                   "classes": {"slide": 1, "flow": 2}, "outside": "unknown", "definition": "d"}})
+    with pytest.raises(TableError, match="name one with layer"):
+        write_table(cfg)
+
+
+def test_relative_output_and_data_dir_resolve_against_the_config(site, tmp_path, monkeypatch):
+    cfg_dir = site / "configs"
+    cfg_dir.mkdir()
+    (cfg_dir / "t.yaml").write_text(yaml.safe_dump({
+        "site": "demo", "data_dir": "..", "extent": "elev.tif", "output": "out/rel.parquet",
+        "features": {"slope": {"path": "slope.tif", "units": "m/m", "definition": "s"}}}))
+    monkeypatch.chdir(tmp_path)
+    cfg = TableConfig.load(cfg_dir / "t.yaml")
+    assert cfg.output == cfg_dir / "out" / "rel.parquet" and cfg.extent == cfg_dir / ".." / "elev.tif"
+    write_table(cfg)
+    assert (cfg_dir / "out" / "rel.parquet").exists()

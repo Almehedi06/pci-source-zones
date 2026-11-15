@@ -8,7 +8,8 @@ which file a feature comes from and in what units, how points or polygons
 become labels, what an unmapped cell counts as, and which cells form an
 official split. The ML side only chooses among these.
 
-Config shape (paths are relative to `data_dir` unless absolute):
+Config shape (input paths are relative to `data_dir`, and `data_dir` and `output` to the
+config file, unless absolute; `where:` values are compared as text, so quote them):
 
     site: montecito
     data_dir: /path/to/aligned
@@ -19,12 +20,17 @@ Config shape (paths are relative to `data_dir` unless absolute):
       soil_thickness: {path: soil_thickness_aligned.tif, units: m, scale: 0.01, valid_range: [0, 5],
                        definition: "...", source: "SOLUS100 anylithicdpt (cm)"}
     labels:
-      p_obs_union:  {raster: p_obs_union_aligned.tif, kind: continuous, valid_range: [0, 1]}
-      erosion:      {raster: p_obs_union_aligned.tif, kind: binary, threshold: 0.10}
-      process:      {polygons: inventory.gpkg, layer: inventory, where: {epoch: 2018_2021},
-                     kind: class, class_field: Primary, classes: {"03_...": 1, ...},
+      p_obs_union:  {raster: p_obs_union_aligned.tif, kind: continuous, valid_range: [0, 1],
+                     definition: "share of 1 m cells with C2 or C3 evidence per 10 m cell"}
+      erosion:      {raster: p_obs_union_aligned.tif, kind: binary, threshold: 0.10, definition: "..."}
+      process:      {polygons: inventory.gpkg, layer: inventory, where: {epoch: "2018_2021"},
+                     kind: class, class_field: Primary, classes: {"03_...": 1, ...}, definition: "...",
                      outside: background, domain: {polygons: inventory.gpkg, layer: mapping_area}}
-      initiation:   {points: points.gpkg, kind: binary, buffer_cells: 1, outside: unknown}
+      initiation:   {points: points.gpkg, kind: binary, buffer_cells: 1, outside: background,
+                     domain: {polygons: footprint.gpkg}, definition: "..."}
+
+Every label needs a `definition`, as every feature does: the ML side compares it between
+sites, so two labels that share a name but not a method cannot be pooled by accident.
     splits:
       official: {polygons: split_polygons.gpkg, id_field: id,
                  assign: {train: [1, 2], test: [3], holdout: [4]}}
@@ -49,6 +55,8 @@ Mistakes this module refuses, because each one produces a plausible table:
 * **"Not mapped" read as "did not happen".** `outside` must be stated for
   polygon and point labels: `background` makes unmapped cells negatives,
   `unknown` leaves them out. `domain` limits where background can be claimed.
+  A cell a polygon only partly covers, or one under a class dropped with
+  `null`, is left unknown, never background.
 * **Silent class mapping.** Every class value present must be mapped, or
   explicitly dropped with `null`.
 * **Overlapping labels.** A cell claimed by two classes is an error, unless
@@ -68,6 +76,7 @@ from typing import Any
 
 import numpy as np
 import rasterio
+import rasterio.windows
 import yaml
 
 from .raster import GridMismatch, grids_match
@@ -116,6 +125,13 @@ def _check_name(kind: str, name: str) -> str:
     return name
 
 
+def _text(where: str, value: Any) -> str:
+    """A required, non-blank string. YAML `key:` with nothing after it is None, not text."""
+    if value is None or not isinstance(value, (str, int, float)) or not str(value).strip():
+        raise TableError(f"{where} is empty; state it, it is what the ML side compares between sites")
+    return str(value).strip()
+
+
 def _range(where: str, value: Any) -> tuple[float, float] | None:
     if value is None:
         return None
@@ -142,15 +158,14 @@ class FeatureSpec:
         where = f"features.{name}"
         _check_keys(where, d, {"path", "units", "definition", "source", "scale", "valid_range"},
                     {"path", "units", "definition"})
-        for key in ("units", "definition"):
-            if not str(d[key]).strip():
-                raise TableError(f"{where}.{key} is empty; state it, it is what the ML side compares between sites")
+        units = _text(f"{where}.units", d["units"])
+        definition = _text(f"{where}.definition", d["definition"])
         scale = None if d.get("scale") is None else float(d["scale"])
         if scale is not None and (not np.isfinite(scale) or scale == 0):
             raise TableError(f"{where}.scale must be a finite non-zero number")
         return cls(name=_check_name("feature", name), path=_resolve(base, d["path"]),
-                   units=str(d["units"]).strip(), definition=str(d["definition"]).strip(),
-                   source=str(d.get("source", "")).strip(), scale=scale,
+                   units=units, definition=definition,
+                   source=str(d.get("source") or "").strip(), scale=scale,
                    valid_range=_range(where, d.get("valid_range")))
 
 
@@ -164,6 +179,16 @@ class VectorSource:
     def read(self, crs: Any):
         import geopandas as gpd
 
+        if not self.path.exists():
+            raise FileNotFoundError(f"vector source: {self.path}")
+        if self.layer is None:
+            try:
+                import pyogrio
+                layers = [str(l[0]) for l in pyogrio.list_layers(self.path)]
+            except Exception:                     # not a multi-layer format, or pyogrio absent
+                layers = []
+            if len(layers) > 1:
+                raise TableError(f"{self.path.name} holds layers {layers}; name one with layer:")
         gdf = gpd.read_file(self.path, layer=self.layer) if self.layer else gpd.read_file(self.path)
         for col, value in self.where.items():
             if col not in gdf.columns:
@@ -195,6 +220,7 @@ class LabelSpec:
     on_overlap: str = "error"
     buffer_cells: int = 0
     all_touched: bool = False
+    definition: str = ""
     description: str = ""
 
     @classmethod
@@ -202,7 +228,8 @@ class LabelSpec:
         where = f"labels.{name}"
         _check_keys(where, d, {"raster", "polygons", "points", "layer", "where", "kind", "threshold",
                                "valid_range", "class_field", "classes", "outside", "domain", "on_overlap",
-                               "buffer_cells", "all_touched", "description"}, {"kind"})
+                               "buffer_cells", "all_touched", "definition", "description"}, {"kind", "definition"})
+        definition = _text(f"{where}.definition", d.get("definition"))
         sources = [k for k in ("raster", "polygons", "points") if k in d]
         if len(sources) != 1:
             raise TableError(f"{where}: give exactly one of raster, polygons or points (got {sources or 'none'})")
@@ -215,12 +242,14 @@ class LabelSpec:
                    class_field=d.get("class_field"), outside=d.get("outside"), domain=d.get("domain"),
                    on_overlap=str(d.get("on_overlap", "error")).lower(),
                    buffer_cells=int(d.get("buffer_cells", 0)), all_touched=bool(d.get("all_touched", False)),
-                   description=str(d.get("description", "")))
+                   definition=definition, description=str(d.get("description") or ""))
         if d.get("classes") is not None:
             if not isinstance(d["classes"], dict) or not d["classes"]:
                 raise TableError(f"{where}.classes must be a non-empty mapping of value -> integer code (or null)")
             spec.classes = {str(k): (None if v is None else int(v)) for k, v in d["classes"].items()}
         vector_keys = {"layer", "where", "class_field", "classes", "outside", "domain", "on_overlap", "all_touched"}
+        if spec.classes is not None and kind != "class":
+            raise TableError(f"{where}: classes apply to kind class only; this label is {kind}")
         if "raster" in d:
             spec.raster = _resolve(base, d["raster"])
             misplaced = vector_keys & set(d) - {"classes"}
@@ -265,8 +294,8 @@ class LabelSpec:
                 spec.domain = dom
         if spec.classes is not None:
             codes = [c for c in spec.classes.values() if c is not None]
-            if any(c < 0 for c in codes):
-                raise TableError(f"{where}.classes: codes must be >= 0")
+            if any(c < 0 or c > 32767 for c in codes):
+                raise TableError(f"{where}.classes: codes must be between 0 and 32767")
             if spec.outside == "background" and 0 in codes:
                 raise TableError(f"{where}.classes: code 0 is the background; number classes from 1")
         return spec
@@ -360,13 +389,14 @@ class TableConfig:
     def from_dict(cls, raw: dict[str, Any], config_dir: Path | None = None) -> "TableConfig":
         _check_keys("table config", raw, {"site", "data_dir", "extent", "output", "features", "labels",
                                           "splits", "terrain", "description"}, {"site", "extent", "output", "features"})
-        data_dir = Path(raw["data_dir"]).expanduser() if raw.get("data_dir") else None
-        base = data_dir or config_dir or Path(".")
+        root = config_dir or Path(".")
+        data_dir = _resolve(root, raw["data_dir"]) if raw.get("data_dir") else None
+        base = data_dir or root
         features_raw = raw["features"]
         if not isinstance(features_raw, dict) or not features_raw:
             raise TableError("features: give at least one feature")
         cfg = cls(site=_check_name("site", raw["site"]), extent=_resolve(base, raw["extent"]),
-                  output=Path(raw["output"]).expanduser(),
+                  output=_resolve(root, raw["output"]),
                   features=[FeatureSpec.parse(n, d or {}, base) for n, d in features_raw.items()],
                   labels=[LabelSpec.parse(n, d or {}, base) for n, d in (raw.get("labels") or {}).items()],
                   splits=[SplitSpec.parse(n, d or {}, base) for n, d in (raw.get("splits") or {}).items()],
@@ -532,6 +562,24 @@ def _rasterize(geoms: list, grid: Grid, all_touched: bool) -> np.ndarray:
                      fill=0, all_touched=all_touched, dtype="uint8").astype(bool)
 
 
+def _covers_a_cell(geom, grid: Grid, all_touched: bool) -> bool:
+    """Whether one polygon labels at least one valid cell, rasterized in its own window only."""
+    from rasterio.features import rasterize
+    from rasterio.windows import Window, from_bounds
+
+    h, w = grid.shape
+    win = from_bounds(*geom.bounds, transform=grid.transform)
+    r0, c0 = max(int(np.floor(win.row_off)) - 1, 0), max(int(np.floor(win.col_off)) - 1, 0)
+    r1 = min(int(np.ceil(win.row_off + win.height)) + 1, h)
+    c1 = min(int(np.ceil(win.col_off + win.width)) + 1, w)
+    if r1 <= r0 or c1 <= c0:
+        return False
+    sub = rasterize([(geom, 1)], out_shape=(r1 - r0, c1 - c0),
+                    transform=rasterio.windows.transform(Window(c0, r0, c1 - c0, r1 - r0), grid.transform),
+                    fill=0, all_touched=all_touched, dtype="uint8").astype(bool)
+    return bool((sub & grid.valid[r0:r1, c0:c1]).any())
+
+
 def _domain_mask(spec: LabelSpec, grid: Grid, base_where: str) -> np.ndarray:
     d = spec.domain
     if d is None:
@@ -574,25 +622,38 @@ def _vector_label(spec: LabelSpec, grid: Grid) -> tuple[np.ndarray, dict[str, An
     per_code = {c: np.zeros(grid.shape, dtype=bool) for c in used}
     dropped = sum(c is None for c in codes)
 
+    unknown_extra = np.zeros(grid.shape, dtype=bool)        # cells a mapped feature touches but does not claim
+    without_cells: dict[str, int] = {}
     if spec.polygons is not None:
         for code in used:
             geoms = [g for g, c in zip(gdf.geometry, codes) if c == code]
             per_code[code] = _rasterize(geoms, grid, spec.all_touched)
+            empty = sum(1 for g in geoms if not _covers_a_cell(g, grid, spec.all_touched))
+            if empty:
+                without_cells[str(code)] = empty
+        # A cell a polygon covers only in part (its centre outside), and a cell under a polygon whose
+        # class was dropped on purpose, is not "mapped, no process": leave it unknown, never background.
+        unknown_extra = _rasterize(list(gdf.geometry), grid, all_touched=True)
         n_outside = 0
+        if without_cells:
+            print(f"  {where}: polygons that cover no cell centre and add no labelled cell, by code: "
+                  f"{without_cells} (set all_touched: true to keep them)")
     else:
         inv = ~grid.transform
         h, w = grid.shape
         n_outside = 0
         k = spec.buffer_cells
         for geom, code in zip(gdf.geometry, codes):
-            if code is None:
-                continue
             col_f, row_f = inv * (geom.x, geom.y)
             r, c = int(np.floor(row_f)), int(np.floor(col_f))
             if not (0 <= r < h and 0 <= c < w):
                 n_outside += 1
                 continue
-            per_code[code][max(r - k, 0):r + k + 1, max(c - k, 0):c + k + 1] = True
+            block = (slice(max(r - k, 0), r + k + 1), slice(max(c - k, 0), c + k + 1))
+            if code is None:                                  # dropped on purpose: unknown, not background
+                unknown_extra[block] = True
+                continue
+            per_code[code][block] = True
         if n_outside:
             raise TableError(f"{where}: {n_outside} point(s) fall outside the grid; check the CRS, "
                              "or select points with where:")
@@ -617,6 +678,8 @@ def _vector_label(spec: LabelSpec, grid: Grid) -> tuple[np.ndarray, dict[str, An
     labelled = claimed > 0
     if spec.outside == "background":
         label[~labelled & domain] = 0
+    n_touched_unknown = int((unknown_extra & ~labelled & domain & grid.valid).sum())
+    label[unknown_extra & ~labelled] = np.nan
     label[~domain] = np.nan
     label[~grid.valid] = np.nan
 
@@ -630,8 +693,11 @@ def _vector_label(spec: LabelSpec, grid: Grid) -> tuple[np.ndarray, dict[str, An
             "buffer_cells": spec.buffer_cells if spec.points is not None else None,
             "all_touched": spec.all_touched if spec.polygons is not None else None,
             "class_field": spec.class_field, "classes": spec.classes,
-            "features_used": int(len(gdf) - dropped), "features_dropped": int(dropped),
-            "cells_with_conflicting_classes": n_clash, "description": spec.description}
+            "features_mapped": int(len(gdf) - dropped), "features_dropped": int(dropped),
+            "features_without_cells": without_cells,
+            "cells_touched_not_claimed_left_unknown": n_touched_unknown,
+            "cells_with_conflicting_classes": n_clash, "definition": spec.definition,
+            "description": spec.description}
     return label, info
 
 
@@ -658,9 +724,16 @@ def _raster_label(spec: LabelSpec, grid: Grid) -> tuple[np.ndarray, dict[str, An
                 raise TableError(f"{where}: a binary raster must hold only 0 and 1, found "
                                  f"{sorted(values)[:8]}; give a threshold to binarise it")
     elif spec.kind == "class":
+        v_all = arr[finite & grid.valid]
+        if np.any(v_all != np.round(v_all)):
+            raise TableError(f"{where}: a class raster must hold whole numbers (resampled with nearest, not "
+                             "bilinear); found fractional values")
+        if v_all.size and (v_all.min() < 0 or v_all.max() > 32767):
+            raise TableError(f"{where}: class values must be between 0 and 32767; found {v_all.min():g} to "
+                             f"{v_all.max():g} (an undeclared fill value?)")
         if spec.classes is not None:
             out = np.full(arr.shape, np.nan, dtype="float32")
-            present = {str(int(v)) for v in np.unique(arr[finite & grid.valid])}
+            present = {str(int(v)) for v in np.unique(v_all)}
             unmapped = sorted(present - set(spec.classes))
             if unmapped:
                 raise TableError(f"{where}: raster values with no code: {unmapped}; map each one, or to null")
@@ -668,10 +741,6 @@ def _raster_label(spec: LabelSpec, grid: Grid) -> tuple[np.ndarray, dict[str, An
                 if code is not None:
                     out[finite & (arr == float(raw))] = code
             arr, rule = out, f"mapped {spec.classes}"
-        else:
-            v = arr[finite & grid.valid]
-            if np.any(v != np.round(v)):
-                raise TableError(f"{where}: a class raster must hold whole numbers")
     arr = arr.copy()
     arr[~grid.valid] = np.nan
     values = arr[grid.valid]
@@ -680,7 +749,8 @@ def _raster_label(spec: LabelSpec, grid: Grid) -> tuple[np.ndarray, dict[str, An
     if spec.kind != "continuous" and not np.nanmax(values) > 0:
         raise TableError(f"{where}: no positive cell inside the extent")
     info = {"kind": spec.kind, "source": str(spec.raster), "geometry": "raster", "rule": rule,
-            "valid_range": spec.valid_range, "classes": spec.classes, "description": spec.description}
+            "valid_range": spec.valid_range, "classes": spec.classes, "definition": spec.definition,
+            "description": spec.description}
     return arr, info
 
 
