@@ -271,6 +271,7 @@ def test_terrain_products_and_shared_definitions(site, tmp_path):
     df, meta = _read(site / "t1.parquet")
     for p in ("slope", "drainage_area", "G", "curvature", "aspect"):
         assert f"terrain_{p}" in df.columns
+    assert not (site / "t1_terrain" / "_work").exists()                     # intermediates cleaned up
     inner = df[(df.row > 2) & (df.row < H - 3) & (df.col > 2) & (df.col < W - 3)]
     assert inner.terrain_slope.median() == pytest.approx(0.2, abs=0.01)
     assert (inner.terrain_drainage_area > 0).all()
@@ -415,3 +416,184 @@ def test_relative_output_and_data_dir_resolve_against_the_config(site, tmp_path,
     assert cfg.output == cfg_dir / "out" / "rel.parquet" and cfg.extent == cfg_dir / ".." / "elev.tif"
     write_table(cfg)
     assert (cfg_dir / "out" / "rel.parquet").exists()
+
+
+# ───────────────────────────────────────────── negatives and block splits
+
+def _pts_label(**extra):
+    return {"init": {"points": "pts.gpkg", "kind": "binary", "definition": "test label", "buffer_cells": 1,
+                     "outside": "background", **extra}}
+
+
+def test_negatives_keep_a_distance_from_positives(site):
+    cfg = _cfg(site, labels=_pts_label(negatives={"min_distance_m": 30}))
+    write_table(cfg)
+    df, meta = _read(cfg.output)
+    lab = df.set_index(["row", "col"]).label_init
+    assert (df.label_init == 1).sum() == 18                       # positives untouched
+    assert pd_isna(lab[(8, 11)])                                  # 20 m from the block around (8, 8)
+    assert lab[(8, 12)] == 0                                      # 30 m: far enough
+    n = meta["labels"]["init"]["negatives"]
+    assert n["removed_near_a_positive"] > 0 and n["negatives"] == (df.label_init == 0).sum()
+
+
+def test_inert_negatives_rule_is_an_error(site):
+    with pytest.raises(TableError, match="inert"):
+        write_table(_cfg(site, labels=_pts_label(negatives={"min_distance_m": 5})))   # under one 10 m cell
+
+
+def test_negatives_need_a_vector_label_with_background(site):
+    with pytest.raises(TableError, match="outside: background"):
+        _cfg(site, labels={"x": {"raster": "pobs.tif", "kind": "binary", "threshold": 0.5, "definition": "d",
+                                 "negatives": {"min_distance_m": 30}}})
+    with pytest.raises(TableError, match="outside: background"):
+        _cfg(site, labels=_pts_label(outside="unknown", negatives={"min_distance_m": 30}))
+    with pytest.raises(TableError, match="unknown key"):
+        _cfg(site, labels=_pts_label(negatives={"min_distance_m": 30, "change": "dz.tif"}))
+
+
+def _many_objects(tmp_path, n=40, size=60, seed=0, crs=CRS, res=RES):
+    """A flat site of size x size cells with n mapped points, so a split has many objects to place."""
+    rng = np.random.default_rng(seed)
+    prof = dict(driver="GTiff", height=size, width=size, count=1, dtype="float32", crs=crs, nodata=-9999.0,
+                transform=from_origin(X0, Y0, res, res))
+    with rasterio.open(tmp_path / "big.tif", "w", **prof) as dst:
+        dst.write(np.ones((size, size), dtype="float32"), 1)
+    rc = rng.integers(2, size - 2, (n, 2))
+    pts = [Point(X0 + (c + 0.5) * res, Y0 - (r + 0.5) * res) for r, c in rc]
+    gpd.GeoDataFrame({"k": range(n)}, geometry=pts, crs=crs).to_file(tmp_path / "many.gpkg")
+    return {"site": "big", "data_dir": str(tmp_path), "extent": "big.tif", "output": str(tmp_path / "big.parquet"),
+            "features": {"e": {"path": "big.tif", "units": "m", "definition": "flat"}},
+            "labels": {"init": {"points": "many.gpkg", "kind": "binary", "definition": "test label", "buffer_cells": 1,
+                                "outside": "background", "negatives": {"min_distance_m": 30}}}}
+
+
+def _splits_per_object(df, split_col):
+    """For each mapped object (8-connected positive cells), how many splits its cells are in."""
+    from scipy.ndimage import label as connected
+    grid = np.zeros((df.row.max() + 1, df.col.max() + 1), dtype=bool)
+    pos = df[df.label_init == 1]
+    grid[pos.row, pos.col] = True
+    comp = connected(grid, structure=np.ones((3, 3), dtype=bool))[0][pos.row, pos.col]
+    return pos.assign(comp=comp).groupby("comp")[split_col].nunique()
+
+
+def test_block_split_keeps_blocks_and_objects_whole_with_both_shares_checked(tmp_path):
+    raw = _many_objects(tmp_path)
+    raw["splits"] = {"b": {"blocks": {"size_m": 100, "test_fraction": 0.3, "seed": 1, "stratify": "init"}}}
+    write_table(TableConfig.from_dict(raw))
+    df, meta = _read(tmp_path / "big.parquet")
+    info = meta["splits"]["b"]
+    assert (_splits_per_object(df, "split_b") == 1).all()             # no mapped object in two splits
+    assert info["objects_cut_by_a_block_edge"] > 0 and info["cells_following_another_block"] > 0
+    pos, neg = df.label_init == 1, df.label_init == 0
+    test = df.split_b == "test"
+    assert abs((pos & test).sum() / pos.sum() - 0.3) <= 0.05             # positives in proportion
+    assert abs((neg & test).sum() / neg.sum() - 0.3) <= 0.05             # and negatives too
+    assert info["positives_by_split"]["test"] == (pos & test).sum()
+    assert info["negatives_by_split"]["test"] == (neg & test).sum()
+    # every cell that did not follow an object keeps its own block's split
+    plain = df[~pos]
+    assert (plain.groupby("group_b").split_b.nunique() == 1).all()
+    first = df.split_b.copy()
+    write_table(TableConfig.from_dict(raw), overwrite=True)            # the seed fixes the draw
+    assert (_read(tmp_path / "big.parquet")[0].split_b == first).all()
+
+
+def test_block_split_too_coarse_for_the_site_is_an_error(tmp_path):
+    raw = _many_objects(tmp_path)
+    raw["splits"] = {"b": {"blocks": {"size_m": 300, "test_fraction": 0.3, "seed": 1, "stratify": "init"}}}
+    with pytest.raises(TableError, match="too coarse|no positive landed"):
+        write_table(TableConfig.from_dict(raw))
+    raw["splits"] = {"b": {"blocks": {"size_m": 5, "test_fraction": 0.3}}}
+    with pytest.raises(TableError, match="smaller than one"):
+        write_table(TableConfig.from_dict(raw))
+
+
+def test_distances_need_a_grid_in_metres(tmp_path):
+    raw = _many_objects(tmp_path, crs="EPSG:4326", res=0.0001)          # degrees: 50 "m" would mean nothing
+    with pytest.raises(TableError, match="metres"):
+        write_table(TableConfig.from_dict(raw))
+
+
+def test_negatives_keep_away_from_a_mapped_polygon_that_claims_no_cell(site):
+    tiny = box(X0 + 200.5, Y0 - 53.0, X0 + 203.0, Y0 - 51.0)              # inside cell (5, 20), off its centre
+    gpd.GeoDataFrame({"k": [1, 2]}, geometry=[tiny, _cell_box(15, 0, 18, 3)], crs=CRS).to_file(site / "tiny.gpkg")
+    cfg = _cfg(site, labels={"x": {"polygons": "tiny.gpkg", "kind": "binary", "definition": "test label",
+                                   "outside": "background", "negatives": {"min_distance_m": 30}}})
+    write_table(cfg)
+    lab = _read(cfg.output)[0].set_index(["row", "col"]).label_x
+    assert pd_isna(lab[(5, 20)])                                         # touched, not claimed: unknown
+    assert pd_isna(lab[(5, 22)]) and pd_isna(lab[(7, 20)])               # 20 m away: unknown, not a 0
+    assert lab[(5, 23)] == 0                                             # 30 m away: a negative
+
+
+def test_empty_negatives_key_is_an_error(site):
+    with pytest.raises(TableError, match="empty"):
+        _cfg(site, labels=_pts_label(negatives=None))
+
+
+def test_block_split_with_nothing_in_test_is_an_error(site):
+    blocks = {"size_m": 50, "test_fraction": 0.01, "stratify": "init"}
+    with pytest.raises(TableError, match="test has no row|no positive landed in test"):
+        write_table(_cfg(site, labels=_pts_label(), splits={"b": {"blocks": blocks}}))
+
+
+def test_block_split_config_errors(site):
+    with pytest.raises(TableError, match="no label"):
+        write_table(_cfg(site, labels=_pts_label(),
+                         splits={"b": {"blocks": {"size_m": 50, "test_fraction": 0.3, "stratify": "nope"}}}))
+    with pytest.raises(TableError, match="fractions"):
+        _cfg(site, splits={"b": {"blocks": {"size_m": 50, "test_fraction": 0.7, "val_fraction": 0.4}}})
+    with pytest.raises(TableError, match="unknown key"):
+        _cfg(site, splits={"b": {"blocks": {"size_m": 50, "test_fraction": 0.3}, "id_field": "id"}})
+
+
+def test_stratify_needs_a_yes_no_or_class_label_and_cannot_be_empty(site):
+    with pytest.raises(TableError, match="continuous"):
+        _cfg(site, labels={"p": {"raster": "pobs.tif", "kind": "continuous", "definition": "d"}},
+             splits={"b": {"blocks": {"size_m": 50, "test_fraction": 0.3, "stratify": "p"}}})
+    with pytest.raises(TableError, match="stratify is empty"):
+        _cfg(site, labels=_pts_label(), splits={"b": {"blocks": {"size_m": 50, "test_fraction": 0.3, "stratify": None}}})
+
+
+def test_a_split_with_no_row_is_an_error(tmp_path):
+    raw = _many_objects(tmp_path)
+    raw["splits"] = {"b": {"blocks": {"size_m": 300, "test_fraction": 0.05}}}     # 4 blocks, none fits 5 %
+    with pytest.raises(TableError, match="test has no row"):
+        write_table(TableConfig.from_dict(raw))
+
+
+def test_rotated_grid_is_refused_for_distances(tmp_path):
+    from rasterio.transform import Affine
+    prof = dict(driver="GTiff", height=30, width=30, count=1, dtype="float32", crs=CRS, nodata=-9999.0,
+                transform=Affine.translation(X0, Y0) * Affine.rotation(45) * Affine.scale(RES, -RES))
+    with rasterio.open(tmp_path / "rot.tif", "w", **prof) as dst:
+        dst.write(np.ones((30, 30), dtype="float32"), 1)
+    centre = prof["transform"] * (15.5, 15.5)
+    gpd.GeoDataFrame({"k": [1]}, geometry=[Point(*centre)], crs=CRS).to_file(tmp_path / "p.gpkg")
+    raw = {"site": "r", "data_dir": str(tmp_path), "extent": "rot.tif", "output": str(tmp_path / "r.parquet"),
+           "features": {"e": {"path": "rot.tif", "units": "m", "definition": "flat"}},
+           "labels": {"x": {"points": "p.gpkg", "kind": "binary", "definition": "d", "outside": "background",
+                            "negatives": {"min_distance_m": 30}}}}
+    with pytest.raises(TableError, match="rotated"):
+        write_table(TableConfig.from_dict(raw))
+
+
+def test_an_object_with_no_block_holding_half_stays_cut_and_is_counted(tmp_path):
+    raw = _many_objects(tmp_path)
+    pts = gpd.read_file(tmp_path / "many.gpkg")
+    boxes = [box(p.x - 1.5 * RES, p.y - 1.5 * RES, p.x + 1.5 * RES, p.y + 1.5 * RES) for p in pts.geometry]
+    strip = box(X0 + 5 * RES, Y0 - 31 * RES, X0 + 35 * RES, Y0 - 30 * RES)       # row 30, cols 5-34: 3 blocks
+    gpd.GeoDataFrame({"k": range(len(boxes) + 1)}, geometry=boxes + [strip], crs=CRS).to_file(tmp_path / "poly.gpkg")
+    raw["labels"] = {"init": {"polygons": "poly.gpkg", "kind": "binary", "definition": "test label",
+                              "outside": "background", "negatives": {"min_distance_m": 30}}}
+    raw["splits"] = {"b": {"blocks": {"size_m": 100, "test_fraction": 0.3, "seed": 1, "stratify": "init"}}}
+    write_table(TableConfig.from_dict(raw))
+    df, meta = _read(tmp_path / "big.parquet")
+    info = meta["splits"]["b"]
+    assert info["objects_left_cut_no_block_holds_half"] >= 1
+    assert info["objects_cut_by_a_block_edge"] > info["objects_left_cut_no_block_holds_half"]
+    strip_cells = df[(df.row == 30) & df.col.between(5, 34)]
+    assert strip_cells.label_init.eq(1).all()
+    assert strip_cells.groupby(strip_cells.col // 10).group_b.nunique().eq(1).all()   # each part keeps its own block

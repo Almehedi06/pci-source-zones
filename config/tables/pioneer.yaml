@@ -3,8 +3,12 @@
 #
 # No observed erosion probability yet (the evidence run on the new change map is pending), so
 # the labels are the 89 USGS-mapped initiation points: yes/no, and by type. They exist only in
-# the lidar footprint; outside it every cell is unlabelled. Inside it, an unmapped cell counts
-# as background, which also counts any initiation the mappers did not mark.
+# the lidar footprint; outside it every cell is unknown. Inside it, an unmapped cell is a
+# negative only when it is at least 50 m from every point's cells. The dDEM is not used to
+# pick negatives: at 10 m it shows change at 14 % of the point cells and 14 % of the rest.
+#
+# The `blocks` split is the first train/test sample: whole 500 m blocks, 30 % of the
+# positives and of the negatives in test. blocks_2 to blocks_5 draw other test blocks.
 site: pioneer
 description: Pioneer Fire 2024, Lake Chelan, 10 m; storm of 8-12 December 2025; points from USGS (doi:10.5066/P1GNNSZU).
 data_dir: /mnt/c/Users/amehedi/Downloads/pioneer_hf/full_area/inputs
@@ -36,7 +40,8 @@ labels:
     buffer_cells: 1
     outside: background
     domain: {polygons: /mnt/c/Users/amehedi/Downloads/pioneer_hf/footprint/aoi.gpkg}
-    definition: "USGS-mapped debris-flow initiation points (Rengers and others 2026, doi:10.5066/P1GNNSZU), 3 x 3 cells around each; 0 elsewhere in the lidar footprint"
+    negatives: {min_distance_m: 50}   # closer to a positive: unknown, not a doubtful 0
+    definition: "USGS-mapped debris-flow initiation points (Rengers and others 2026, doi:10.5066/P1GNNSZU), 3 x 3 cells around each; in the lidar footprint, 0 at least 50 m from a positive cell, unknown closer"
   initiation_type:
     points: /mnt/c/Users/amehedi/Downloads/pioneer_hf/truth/initiation_points.gpkg
     kind: class
@@ -46,4 +51,13 @@ labels:
     outside: background
     on_overlap: unknown
     domain: {polygons: /mnt/c/Users/amehedi/Downloads/pioneer_hf/footprint/aoi.gpkg}
-    definition: "USGS-mapped debris-flow initiation points by type (1 landslide, 2 runoff, 3 firehose), 3 x 3 cells around each; 0 elsewhere in the lidar footprint"
+    negatives: {min_distance_m: 50}   # closer to a positive: unknown, not a doubtful 0
+    definition: "USGS-mapped debris-flow initiation points by type (1 landslide, 2 runoff, 3 firehose), 3 x 3 cells around each; in the lidar footprint, 0 at least 50 m from a positive cell, unknown closer"
+
+splits:
+  blocks:   {blocks: {size_m: 500, test_fraction: 0.3, seed: 42, stratify: initiation}}
+  # the same rule with other seeds, so a run can be repeated and scored as a mean and a range
+  blocks_2: {blocks: {size_m: 500, test_fraction: 0.3, seed: 2, stratify: initiation}}
+  blocks_3: {blocks: {size_m: 500, test_fraction: 0.3, seed: 6, stratify: initiation}}   # seed 3 fails the share check at Pioneer
+  blocks_4: {blocks: {size_m: 500, test_fraction: 0.3, seed: 4, stratify: initiation}}
+  blocks_5: {blocks: {size_m: 500, test_fraction: 0.3, seed: 5, stratify: initiation}}

@@ -60,7 +60,8 @@ labels:
     all_touched: true        # small scars cover no cell centre; keep every mapped initiation
     outside: background
     domain: {polygons: /mnt/c/Users/amehedi/Downloads/eaglecreek_inventory.gpkg, layer: mapping_area, where: {epoch: "2018_2021"}}
-    definition: "debris-flow initiation polygons mapped for 2018-2021 (inventory codes 07, 08, 09, 10, 12, 14), every cell a polygon touches; 0 inside the mapping area elsewhere"
+    negatives: {min_distance_m: 50}   # closer to a positive: unknown, not a doubtful 0
+    definition: "debris-flow initiation polygons mapped for 2018-2021 (inventory codes 07, 08, 09, 10, 12, 14), every cell a polygon touches; in the mapping area, 0 at least 50 m from a positive cell, unknown closer"
   process:
     polygons: /mnt/c/Users/amehedi/Downloads/eaglecreek_inventory.gpkg
     layer: inventory
@@ -69,7 +70,8 @@ labels:
     class_field: Primary
     outside: background
     domain: {polygons: /mnt/c/Users/amehedi/Downloads/eaglecreek_inventory.gpkg, layer: mapping_area, where: {epoch: "2018_2021"}}
-    definition: "process polygons mapped for 2018-2021 (eaglecreek_inventory.gpkg), grouped: 1 debris-flow initiation, 2 transport, 3 deposition, 4 other landslide or fall; 0 inside the mapping area with no polygon; partly covered cells unknown"
+    negatives: {min_distance_m: 50}   # closer to a positive: unknown, not a doubtful 0
+    definition: "process polygons mapped for 2018-2021 (eaglecreek_inventory.gpkg), grouped: 1 debris-flow initiation, 2 transport, 3 deposition, 4 other landslide or fall; partly covered cells unknown; in the mapping area, 0 at least 50 m from a positive cell, unknown closer"
     description: "the grouping is a proposal; edit the classes mapping to change it"
     classes:
       "01_Deep landslide (evacuated)": 4
@@ -95,3 +97,13 @@ labels:
       "22_DF Deposition – Levee (deposition)": 3
       "23_DF Deposition – Hyper concentrated flow deposition": 3
       "24_DF Deposition – Woody-debris (jam)": 3
+
+# The first train/test sample: whole 500 m blocks, 30 % of the initiation positives and of
+# the negatives in test. blocks_2 to blocks_5 draw other test blocks.
+splits:
+  blocks:   {blocks: {size_m: 500, test_fraction: 0.3, seed: 42, stratify: initiation}}
+  # the same rule with other seeds, so a run can be repeated and scored as a mean and a range
+  blocks_2: {blocks: {size_m: 500, test_fraction: 0.3, seed: 2, stratify: initiation}}
+  blocks_3: {blocks: {size_m: 500, test_fraction: 0.3, seed: 6, stratify: initiation}}   # seed 3 fails the share check at Pioneer
+  blocks_4: {blocks: {size_m: 500, test_fraction: 0.3, seed: 4, stratify: initiation}}
+  blocks_5: {blocks: {size_m: 500, test_fraction: 0.3, seed: 5, stratify: initiation}}

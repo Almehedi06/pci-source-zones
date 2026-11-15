@@ -31,6 +31,31 @@ config file, unless absolute; `where:` values are compared as text, so quote the
 
 Every label needs a `definition`, as every feature does: the ML side compares it between
 sites, so two labels that share a name but not a method cannot be pooled by accident.
+
+A point or polygon label with `outside: background` can keep its negatives away from the
+positives, where a mapping offset or an unmapped neighbour makes a 0 doubtful:
+
+      negatives: {min_distance_m: 50}       # background closer than this to a positive is unknown
+                                            # (measured from the features' cells on this grid; a
+                                            #  feature wholly outside the grid protects nothing)
+
+There is deliberately no rule on terrain or on change. A slope floor drops gentle negatives
+but keeps gentle positives, so a model learns that gentle ground is positive; a dDEM rule
+drops deposition (a certain negative for initiation) and, where the dDEM does not resolve the
+scars (Pioneer, 10 m), drops negatives at random.
+
+A split can also be drawn as whole square blocks, so test cells do not sit beside
+training cells; with `stratify` (a binary or class label), test (and val) get their fraction
+of that label's positives and of its negatives, each within 5 percentage points or the table
+is not written, and a mapped object of that label (touching positive cells) cut by a block
+edge follows the block holding at least half of it, so such a scar is in one split only.
+Objects of other labels, and objects with no such block, are not moved; the metadata counts
+them:
+
+      blocks: {blocks: {size_m: 500, test_fraction: 0.3, val_fraction: 0.0, seed: 42,
+                        stratify: initiation}}
+
+Distances and block sizes are in metres: both need a grid in metres with square cells.
     splits:
       official: {polygons: split_polygons.gpkg, id_field: id,
                  assign: {train: [1, 2], test: [3], holdout: [4]}}
@@ -69,6 +94,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shutil
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -205,6 +231,20 @@ class VectorSource:
 
 
 @dataclass
+class NegativesSpec:
+    """Which background cells of a point or polygon label count as negatives."""
+    min_distance_m: float
+
+    @classmethod
+    def parse(cls, where: str, d: dict[str, Any]) -> "NegativesSpec":
+        _check_keys(where, d, {"min_distance_m"}, {"min_distance_m"})
+        spec = cls(min_distance_m=float(d["min_distance_m"]))
+        if spec.min_distance_m <= 0:
+            raise TableError(f"{where}.min_distance_m must be > 0")
+        return spec
+
+
+@dataclass
 class LabelSpec:
     name: str
     kind: str
@@ -222,13 +262,15 @@ class LabelSpec:
     all_touched: bool = False
     definition: str = ""
     description: str = ""
+    negatives: NegativesSpec | None = None
 
     @classmethod
     def parse(cls, name: str, d: dict[str, Any], base: Path) -> "LabelSpec":
         where = f"labels.{name}"
         _check_keys(where, d, {"raster", "polygons", "points", "layer", "where", "kind", "threshold",
                                "valid_range", "class_field", "classes", "outside", "domain", "on_overlap",
-                               "buffer_cells", "all_touched", "definition", "description"}, {"kind", "definition"})
+                               "buffer_cells", "all_touched", "definition", "description", "negatives"},
+                    {"kind", "definition"})
         definition = _text(f"{where}.definition", d.get("definition"))
         sources = [k for k in ("raster", "polygons", "points") if k in d]
         if len(sources) != 1:
@@ -292,6 +334,13 @@ class LabelSpec:
                     if key in dom:
                         dom[key] = str(_resolve(base, dom[key]))
                 spec.domain = dom
+        if "negatives" in d:
+            if d["negatives"] is None:
+                raise TableError(f"{where}.negatives is empty; give min_distance_m, or remove the key")
+            if spec.raster is not None or spec.outside != "background":
+                raise TableError(f"{where}.negatives narrows background cells: it needs a point or polygon "
+                                 "label with outside: background")
+            spec.negatives = NegativesSpec.parse(f"{where}.negatives", d["negatives"])
         if spec.classes is not None:
             codes = [c for c in spec.classes.values() if c is not None]
             if any(c < 0 or c > 32767 for c in codes):
@@ -308,13 +357,30 @@ class SplitSpec:
     raster: Path | None = None
     id_field: str | None = None
     assign: dict[str, list[Any]] = field(default_factory=dict)
+    blocks: dict[str, Any] | None = None
 
     @classmethod
     def parse(cls, name: str, d: dict[str, Any], base: Path) -> "SplitSpec":
         where = f"splits.{name}"
+        if "blocks" in d:
+            _check_keys(where, d, {"blocks"})
+            b = d["blocks"]
+            _check_keys(f"{where}.blocks", b, {"size_m", "test_fraction", "val_fraction", "seed", "stratify"},
+                        {"size_m", "test_fraction"})
+            if "stratify" in b and b["stratify"] is None:
+                raise TableError(f"{where}.blocks.stratify is empty; name a label, or remove the key")
+            blocks = {"size_m": float(b["size_m"]), "test_fraction": float(b["test_fraction"]),
+                      "val_fraction": float(b.get("val_fraction", 0.0)), "seed": int(b.get("seed", 42)),
+                      "stratify": b.get("stratify")}
+            if blocks["size_m"] <= 0:
+                raise TableError(f"{where}.blocks.size_m must be > 0")
+            if not (0 < blocks["test_fraction"] < 1 and 0 <= blocks["val_fraction"] < 1
+                    and blocks["test_fraction"] + blocks["val_fraction"] < 1):
+                raise TableError(f"{where}.blocks: fractions between 0 and 1, summing below 1")
+            return cls(name=_check_name("split", name), blocks=blocks)
         _check_keys(where, d, {"polygons", "raster", "layer", "where", "id_field", "assign"}, {"assign"})
         if ("polygons" in d) == ("raster" in d):
-            raise TableError(f"{where}: give exactly one of polygons or raster")
+            raise TableError(f"{where}: give exactly one of polygons, raster or blocks")
         assign = d["assign"]
         if not isinstance(assign, dict) or not assign:
             raise TableError(f"{where}.assign must map split names to ids (polygons) or values (raster)")
@@ -408,6 +474,14 @@ class TableConfig:
                 raise TableError(f"features {clash} collide with the terrain products; rename them")
         if cfg.output.suffix != ".parquet":
             raise TableError(f"output must end in .parquet: {cfg.output}")
+        kinds = {spec.name: spec.kind for spec in cfg.labels}
+        for split in cfg.splits:
+            strat = (split.blocks or {}).get("stratify")
+            if strat is not None and strat not in kinds:
+                raise TableError(f"splits.{split.name}.blocks.stratify: no label {strat!r}; labels are {sorted(kinds)}")
+            if strat is not None and kinds[strat] == "continuous":
+                raise TableError(f"splits.{split.name}.blocks.stratify: {strat!r} is continuous; stratify needs a "
+                                 "binary or class label, whose positives are what the split balances")
         return cfg
 
 
@@ -534,6 +608,7 @@ def build_terrain(spec: TerrainSpec, grid: Grid, output: Path) -> dict[str, tupl
         aspect, _ = read_float(aspect_path)
         write_float(files["aspect"], mask_edges(aspect, valid_cells(dem)), profile)
         stamp_path.write_text(json.dumps(stamp))
+        shutil.rmtree(work)                  # intermediates; kept only when routing fails
     res = abs(float(grid.transform.a))
     out = {}
     for product in spec.products:
@@ -609,6 +684,45 @@ def _class_codes(spec: LabelSpec, gdf) -> tuple[Any, list[int]]:
     return codes, sorted({c for c in codes if c is not None})
 
 
+def _metric_cell(grid: Grid, where: str) -> float:
+    """The cell size in metres. Distances and block sizes are given in metres."""
+    a, e = abs(float(grid.transform.a)), abs(float(grid.transform.e))
+    if grid.transform.b != 0 or grid.transform.d != 0:
+        raise TableError(f"{where}: the grid is rotated or sheared; distances need a north-up grid")
+    units = str(grid.crs.linear_units or "").lower() if grid.crs.is_projected else "degrees"
+    if units not in ("metre", "meter", "metres", "meters", "m"):
+        raise TableError(f"{where}: distances are in metres; this grid's CRS is in {units}")
+    if not np.isclose(a, e, rtol=1e-6):
+        raise TableError(f"{where}: distances need square cells; these are {a:g} x {e:g}")
+    return a
+
+
+def _apply_negatives(spec: LabelSpec, label: np.ndarray, grid: Grid, sources: np.ndarray) -> dict[str, Any]:
+    """Leave unknown every background cell closer than min_distance_m to a mapped positive.
+
+    `sources` is every cell a positive feature claims or touches, before conflicts, domain or
+    extent masking: a small polygon whose cells end up unknown still keeps its neighbours
+    from being a confident 0."""
+    from scipy.ndimage import distance_transform_edt
+
+    where = f"labels.{spec.name}.negatives"
+    cell = _metric_cell(grid, where)
+    background = (label == 0) & grid.valid
+    if not sources.any():
+        raise TableError(f"labels.{spec.name}: no positive cell, so no distance to one")
+    near = distance_transform_edt(~sources) * cell < spec.negatives.min_distance_m
+    removed = int((background & near).sum())
+    if removed == 0:
+        raise TableError(f"{where}: min_distance_m {spec.negatives.min_distance_m:g} removed no background "
+                         "cell; the rule is inert (shorter than one cell?)")
+    label[background & near] = np.nan
+    kept = int(((label == 0) & grid.valid).sum())
+    if kept == 0:
+        raise TableError(f"{where}: every background cell is within min_distance_m of a positive")
+    return {"min_distance_m": spec.negatives.min_distance_m, "background_before": int(background.sum()),
+            "removed_near_a_positive": removed, "negatives": kept}
+
+
 def _vector_label(spec: LabelSpec, grid: Grid) -> tuple[np.ndarray, dict[str, Any]]:
     where = f"labels.{spec.name}"
     src = spec.polygons or spec.points
@@ -682,6 +796,12 @@ def _vector_label(spec: LabelSpec, grid: Grid) -> tuple[np.ndarray, dict[str, An
     label[unknown_extra & ~labelled] = np.nan
     label[~domain] = np.nan
     label[~grid.valid] = np.nan
+    negatives = None
+    if spec.negatives is not None:
+        sources = claimed > 0
+        if spec.polygons is not None:
+            sources |= _rasterize([g for g, c in zip(gdf.geometry, codes) if c is not None], grid, all_touched=True)
+        negatives = _apply_negatives(spec, label, grid, sources)
 
     positives = int(np.isfinite(label[grid.valid]).sum() - (label[grid.valid] == 0).sum())
     if positives == 0:
@@ -697,7 +817,7 @@ def _vector_label(spec: LabelSpec, grid: Grid) -> tuple[np.ndarray, dict[str, An
             "features_without_cells": without_cells,
             "cells_touched_not_claimed_left_unknown": n_touched_unknown,
             "cells_with_conflicting_classes": n_clash, "definition": spec.definition,
-            "description": spec.description}
+            "description": spec.description, "negatives": negatives}
     return label, info
 
 
@@ -770,9 +890,119 @@ def build_label(spec: LabelSpec, grid: Grid) -> tuple[np.ndarray, dict[str, Any]
 
 # ─────────────────────────────────────────────────────────────── splits
 
-def build_split(spec: SplitSpec, grid: Grid) -> tuple[np.ndarray, np.ndarray | None, dict[str, Any]]:
-    """Split name per row (None outside every assignment) and the polygon id per row."""
+SHARE_TOLERANCE = 0.05     # how far a block split's share of positives or negatives may miss its fraction
+
+
+def _block_split(spec: SplitSpec, grid: Grid, labels: dict[str, np.ndarray]) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    """Whole square blocks to test, val and train, in a seeded random order.
+
+    With `stratify`, each mapped object (8-connected positive cells of that label) follows the
+    block holding most of its cells, so an object cut by a block edge is never in two splits.
+    Blocks with positives are placed first, on their positives; their negatives count towards
+    the negatives' quota, which blocks without positives then fill; blocks with no labelled
+    cell fill a quota of cells. The shares reached are checked, not assumed."""
+    from scipy.ndimage import label as connected
+
+    b, where = spec.blocks, f"splits.{spec.name}.blocks"
+    cell = _metric_cell(grid, where)
+    if b["size_m"] < cell:
+        raise TableError(f"{where}.size_m {b['size_m']:g} is smaller than one {cell:g} m cell; blocks of "
+                         "single cells put test cells beside training cells")
+    k = int(round(b["size_m"] / cell))
+    rows, cols = np.nonzero(grid.valid)
+    uniq, inv = np.unique((rows // k).astype(np.int64) * (grid.shape[1] // k + 1) + cols // k, return_inverse=True)
+    nb = len(uniq)
+    follow = inv.copy()                                   # the block each row goes with
+    strat, objects_cut, objects_left_cut = b["stratify"], 0, 0
+    if strat is not None:
+        if strat not in labels:
+            raise TableError(f"{where}.stratify: no label {strat!r}; labels are {sorted(labels)}")
+        lab_grid = labels[strat]
+        lab = lab_grid[rows, cols]
+        is_pos, is_neg = np.isfinite(lab) & (lab > 0), np.isfinite(lab) & (lab == 0)
+        if not is_pos.any():
+            raise TableError(f"{where}.stratify: label {strat!r} has no positive cell")
+        comp = connected(np.isfinite(lab_grid) & (lab_grid > 0), structure=np.ones((3, 3), dtype=bool))[0][rows, cols]
+        key, n = np.unique(comp[is_pos].astype(np.int64) * nb + inv[is_pos], return_counts=True)
+        kcomp, kblock = key // nb, key % nb
+        order = np.lexsort((-n, kcomp))                   # by object, the block with most of it first
+        first = np.r_[True, kcomp[order][1:] != kcomp[order][:-1]]
+        size = np.bincount(comp[is_pos], minlength=int(comp.max()) + 1)
+        best, best_n = kcomp[order][first], n[order][first]
+        movable = best[2 * best_n >= size[best]]              # a block holds at least half of the object
+        majority = np.full(int(comp.max()) + 1, -1, dtype=np.int64)
+        majority[movable] = kblock[order][first][2 * best_n >= size[best]]
+        spans = np.bincount(kcomp) > 1
+        objects_cut = int(spans.sum())
+        objects_left_cut = int((spans & (majority[:len(spans)] < 0)).sum())
+        moves = is_pos & (majority[comp] >= 0)
+        follow[moves] = majority[comp[moves]]
+        pos = np.bincount(follow, weights=is_pos.astype(float), minlength=nb)
+        neg = np.bincount(follow, weights=is_neg.astype(float), minlength=nb)
+        kind = np.where(pos > 0, 0, np.where(neg > 0, 1, 2))
+    else:
+        is_pos = is_neg = np.zeros(len(rows), dtype=bool)
+        pos = neg = np.zeros(nb)
+        kind = np.full(nb, 2)
+    cells = np.bincount(follow, minlength=nb).astype(float)
+    free = cells * (kind == 2)                            # cells of blocks with no labelled cell
+    measure, total = (pos, neg, free), (pos.sum(), neg.sum(), free.sum())
+    fractions = {"test": b["test_fraction"], "val": b["val_fraction"]}
+    filled = {split: np.zeros(3) for split in fractions}
+    role = np.zeros(nb, dtype=np.int8)                    # index into SPLIT_NAMES; 0 = train
+    order = np.random.default_rng(b["seed"]).permutation(nb)
+    for i in order[np.argsort(kind[order], kind="stable")]:   # blocks with positives first
+        q = kind[i]
+        for split, frac in fractions.items():
+            if frac > 0 and filled[split][q] + measure[q][i] / 2 <= frac * total[q]:
+                role[i] = SPLIT_NAMES.index(split)
+                filled[split] += (pos[i], neg[i], free[i])
+                break
+    code = role[follow]
+    names = np.array(SPLIT_NAMES, dtype=object)[code]
+    used = [i for i, _ in enumerate(SPLIT_NAMES) if (code == i).any()]
+    info: dict[str, Any] = {"source": "blocks", **b, "block_cells": k, "blocks": int(nb),
+                            "blocks_by_split": {SPLIT_NAMES[i]: int((role == i).sum()) for i in used},
+                            "rows": {SPLIT_NAMES[i]: int((code == i).sum()) for i in used}}
+    checks = {"rows": np.ones(len(code), dtype=bool)}
+    if strat is not None:
+        info["positives_by_split"] = {SPLIT_NAMES[i]: int((is_pos & (code == i)).sum()) for i in used}
+        info["negatives_by_split"] = {SPLIT_NAMES[i]: int((is_neg & (code == i)).sum()) for i in used}
+        info["objects_cut_by_a_block_edge"] = objects_cut
+        info["objects_left_cut_no_block_holds_half"] = objects_left_cut
+        info["cells_following_another_block"] = int((follow != inv).sum())
+        if objects_left_cut:
+            print(f"  {where}: {objects_left_cut} of {objects_cut} objects cut by a block edge have no block "
+                  "holding half of them and stay cut between splits")
+        checks = {"positives": is_pos, **({"negatives": is_neg} if is_neg.any() else {})}
+    shares = {}
+    for split in ["train"] + [s for s, f in fractions.items() if f > 0]:
+        here = code == SPLIT_NAMES.index(split)
+        if not here.any():
+            raise TableError(f"{where}: {split} has no row; use smaller blocks or other fractions")
+        if strat is not None and not (is_pos & here).any():
+            raise TableError(f"{where}: no positive landed in {split}; use smaller blocks or another seed")
+    for split, frac in fractions.items():
+        if frac == 0:
+            continue
+        here = code == SPLIT_NAMES.index(split)
+        for what, mask in checks.items():
+            share = float((mask & here).sum() / mask.sum())
+            shares[f"{split}_{what}"] = round(share, 4)
+            if abs(share - frac) > SHARE_TOLERANCE:
+                raise TableError(f"{where}: {split} holds {share:.1%} of the {what}, not {frac:.0%} (tolerance "
+                                 f"{SHARE_TOLERANCE:.0%}); the blocks are too coarse for this site: use smaller "
+                                 "blocks, or another seed")
+    info["shares"] = shares
+    return names, uniq[follow], info
+
+
+def build_split(spec: SplitSpec, grid: Grid,
+                labels: dict[str, np.ndarray] | None = None) -> tuple[np.ndarray, np.ndarray | None, dict[str, Any]]:
+    """Split name per row (None outside every assignment) and the group (polygon or block) per row."""
     where = f"splits.{spec.name}"
+    if spec.blocks is not None:
+        return _block_split(spec, grid, labels or {})
     code = np.full(grid.shape, -1, dtype=np.int8)          # index into SPLIT_NAMES, -1 = unassigned
     group = None
     if spec.polygons is not None:
@@ -860,9 +1090,13 @@ def write_table(cfg: TableConfig, *, overwrite: bool = False) -> dict[str, Any]:
             print(f"  feature {name:<26} {info['units']:<14} valid {info['valid_rows']:>10,}  "
                   f"median {info['median']:.4g}")
 
+    label_grids: dict[str, np.ndarray] = {}
     meta_labels = {}
     for spec in cfg.labels:
         values, info = build_label(spec, grid)
+        full = np.full(grid.shape, np.nan, dtype="float32")
+        full[grid.valid] = values
+        label_grids[spec.name] = full
         if spec.kind == "continuous":
             columns[f"label_{spec.name}"] = pa.array(values.astype("float32"), from_pandas=True)
         else:
@@ -872,10 +1106,14 @@ def write_table(cfg: TableConfig, *, overwrite: bool = False) -> dict[str, Any]:
         meta_labels[spec.name] = info
         detail = info.get("counts") or f"range {info['min']:.3g} to {info['max']:.3g}"
         print(f"  label   {spec.name:<26} {spec.kind:<14} labelled {info['labelled_rows']:>10,}  {detail}")
+        if info.get("negatives"):
+            n = info["negatives"]
+            print(f"          negatives: {n['negatives']:,} of {n['background_before']:,} background cells, "
+                  f"{n['removed_near_a_positive']:,} within {n['min_distance_m']:g} m of a positive left unknown")
 
     meta_splits = {}
     for spec in cfg.splits:
-        names_, group, info = build_split(spec, grid)
+        names_, group, info = build_split(spec, grid, label_grids)
         columns[f"split_{spec.name}"] = pa.array(list(names_), pa.string())
         if group is not None:
             columns[f"group_{spec.name}"] = pa.array(group, mask=group < 0, type=pa.int64())
