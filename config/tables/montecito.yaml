@@ -11,6 +11,12 @@ data_dir: /mnt/c/Users/amehedi/Downloads/thomas/aligned
 extent: elevation_aligned.tif
 output: /mnt/c/Users/amehedi/Downloads/ml_tables/montecito.parquet
 
+# Terrain from this repo's one method on the table's own 10 m DEM: terrain_slope,
+# terrain_drainage_area, terrain_G, terrain_curvature, terrain_aspect. Same units and
+# definitions at every site, so these are the terrain features to use across fires.
+terrain:
+  dem: elevation_aligned.tif
+
 features:
   G:              {path: /mnt/c/Users/amehedi/Downloads/G_topographic_driving_index.tif, units: m,
                    definition: "G = a S^(7/6), Landlab terrain on the 10 m DEM", source: G_topographic_driving_index.tif}

@@ -1,0 +1,49 @@
+# Pioneer Fire ML table: one row per 10 m cell of the whole burned watershed (full area).
+#   pci-zones table --config config/tables/pioneer.yaml
+#
+# No observed erosion probability yet (the evidence run on the new change map is pending), so
+# the labels are the 89 USGS-mapped initiation points: yes/no, and by type. They exist only in
+# the lidar footprint; outside it every cell is unlabelled. Inside it, an unmapped cell counts
+# as background, which also counts any initiation the mappers did not mark.
+site: pioneer
+description: Pioneer Fire 2024, Lake Chelan, 10 m; storm of 8-12 December 2025; points from USGS (doi:10.5066/P1GNNSZU).
+data_dir: /mnt/c/Users/amehedi/Downloads/pioneer_hf/full_area/inputs
+extent: topographic__elevation.tif
+output: /mnt/c/Users/amehedi/Downloads/ml_tables/pioneer.parquet
+
+terrain:
+  dem: topographic__elevation.tif
+
+features:
+  elevation:      {path: topographic__elevation.tif, units: m, definition: "ground elevation", source: USGS 3DEP 1/3 arc-second}
+  dnbr:           {path: /mnt/c/Users/amehedi/Downloads/pioneer/huc_pioneer1_10m/remote_sensing/hls_delta_nbr.tif,
+                   units: dNBR x 1000, scale: -1.0, definition: "differenced normalized burn ratio x 1000",
+                   source: "HLS v2.0 medians, Jul-Sep 2023 vs Jul-Sep 2025; stored as post minus pre, sign flipped"}
+  ndvi_diff:      {path: vegetation__delta_ndvi.tif, units: "-", valid_range: [-2, 2], definition: "NDVI post-fire minus pre-fire",
+                   source: "HLS v2.0 medians, Jul-Sep 2023 vs Jul-Sep 2025"}
+  soil_thickness: {path: soil__thickness.tif, units: m, valid_range: [0, 5], definition: "depth to bedrock or lithic contact",
+                   source: SOLUS100 anylithicdpt via landlab_data_prep}
+  sand_total:     {path: sand__total.tif, units: "%", valid_range: [0, 100], definition: "sand fraction, topsoil", source: SOLUS100}
+  silt_total:     {path: silt__total.tif, units: "%", valid_range: [0, 100], definition: "silt fraction, topsoil", source: SOLUS100}
+  ksat:           {path: soil__saturated_hydraulic_conductivity.tif, units: m/day, valid_range: [0, 100],
+                   definition: "saturated hydraulic conductivity, landlab_data_prep pedotransfer from pH, clay, silt and CEC"}
+  ph:             {path: pH.tif, units: pH, valid_range: [3, 10], definition: "soil pH, 1:1 water, topsoil", source: SOLUS100}
+
+labels:
+  initiation:
+    points: /mnt/c/Users/amehedi/Downloads/pioneer_hf/truth/initiation_points.gpkg
+    kind: binary
+    buffer_cells: 1
+    outside: background
+    domain: {polygons: /mnt/c/Users/amehedi/Downloads/pioneer_hf/footprint/aoi.gpkg}
+    description: "debris-flow initiation, 3 x 3 cells around each mapped point; 0 elsewhere in the lidar footprint"
+  initiation_type:
+    points: /mnt/c/Users/amehedi/Downloads/pioneer_hf/truth/initiation_points.gpkg
+    kind: class
+    class_field: FailureTyp
+    classes: {LS: 1, Runoff: 2, Firehose: 3}
+    buffer_cells: 1
+    outside: background
+    on_overlap: unknown
+    domain: {polygons: /mnt/c/Users/amehedi/Downloads/pioneer_hf/footprint/aoi.gpkg}
+    description: "initiation type: 1 landslide, 2 runoff, 3 firehose; 0 elsewhere in the lidar footprint"

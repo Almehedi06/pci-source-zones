@@ -61,6 +61,11 @@ and a `valid_range` that catches centimetres declared as metres), how points and
 become labels, and whether an unmapped cell is `background` or `unknown`. The config
 format and the mistakes it refuses are in the docstring of `src/pci_source_zones/table.py`.
 
+`terrain: {dem: <10 m DEM>}` adds `terrain_slope`, `terrain_drainage_area`, `terrain_G`,
+`terrain_curvature` and `terrain_aspect`, computed by this repo's one terrain method
+(`physics/terrain.py`) on the site's own DEM. Their units and definitions are identical at
+every site with the same cell size, which is what lets the ML repository mix fires.
+
 ## Stages
 
 | Stage | Produces |

@@ -252,3 +252,85 @@ def test_cli(site):
     assert main(["table", "--config", str(cfg_path)]) == 0
     assert (site / "cli.parquet").exists()
     assert main(["table", "--config", str(cfg_path)]) == 2          # exists, no --overwrite
+
+
+# ───────────────────────────────────────────── terrain from this repo's one method
+
+def _plane(site, name="dem.tif", gradient=0.2):
+    rows, cols = np.mgrid[0:H, 0:W]
+    dem = 500.0 - gradient * RES * rows + 0.001 * cols      # falls to the south, 0.2 m/m
+    return _raster(site / name, dem)
+
+
+def test_terrain_products_and_shared_definitions(site, tmp_path):
+    _plane(site)
+    raw = {"site": "demo", "data_dir": str(site), "extent": "dem.tif", "output": str(site / "t1.parquet"),
+           "features": {"elevation": {"path": "dem.tif", "units": "m", "definition": "ground elevation"}},
+           "terrain": {"dem": "dem.tif"}}
+    write_table(TableConfig.from_dict(raw))
+    df, meta = _read(site / "t1.parquet")
+    for p in ("slope", "drainage_area", "G", "curvature", "aspect"):
+        assert f"terrain_{p}" in df.columns
+    inner = df[(df.row > 2) & (df.row < H - 3) & (df.col > 2) & (df.col < W - 3)]
+    assert inner.terrain_slope.median() == pytest.approx(0.2, abs=0.01)
+    assert (inner.terrain_drainage_area > 0).all()
+    assert inner.terrain_aspect.median() == pytest.approx(180, abs=5)       # facing south
+    assert df.terrain_slope.isna().sum() > 0                                 # the edge ring is nodata
+    # a second site with the same cell size gets the same definitions, so the ML side can mix them
+    other = tmp_path / "other"
+    other.mkdir()
+    _plane(other, gradient=0.3)
+    raw2 = {**raw, "site": "other", "data_dir": str(other), "output": str(other / "t2.parquet")}
+    write_table(TableConfig.from_dict(raw2))
+    _, meta2 = _read(other / "t2.parquet")
+    for p in ("slope", "drainage_area", "G", "curvature", "aspect"):
+        assert meta["features"][f"terrain_{p}"]["definition"] == meta2["features"][f"terrain_{p}"]["definition"]
+        assert "10 m DEM" in meta["features"][f"terrain_{p}"]["definition"]
+
+
+def test_terrain_cache_is_reused(site, monkeypatch):
+    _plane(site)
+    raw = {"site": "demo", "data_dir": str(site), "extent": "dem.tif", "output": str(site / "c.parquet"),
+           "features": {"elevation": {"path": "dem.tif", "units": "m", "definition": "e"}},
+           "terrain": {"dem": "dem.tif", "products": ["slope", "G"]}}
+    write_table(TableConfig.from_dict(raw))
+    import pci_source_zones.physics.terrain as terrain
+    monkeypatch.setattr(terrain, "route", lambda *a, **k: (_ for _ in ()).throw(AssertionError("rerouted")))
+    write_table(TableConfig.from_dict(raw), overwrite=True)                 # cache hit: no routing
+    df, _ = _read(site / "c.parquet")
+    assert {"terrain_slope", "terrain_G"} <= set(df.columns) and "terrain_aspect" not in df.columns
+
+
+def test_terrain_dem_must_be_on_the_grid(site):
+    _raster(site / "shifted_dem.tif", np.full((H, W), 100.0), origin=(X0 + 5, Y0))
+    raw = {"site": "demo", "data_dir": str(site), "extent": "elev.tif", "output": str(site / "g.parquet"),
+           "features": {"elevation": {"path": "elev.tif", "units": "m", "definition": "e"}},
+           "terrain": {"dem": "shifted_dem.tif"}}
+    with pytest.raises(GridMismatch):
+        write_table(TableConfig.from_dict(raw))
+
+
+def test_terrain_name_clash_and_unknown_product(site):
+    base = {"site": "demo", "data_dir": str(site), "extent": "elev.tif", "output": str(site / "x.parquet")}
+    with pytest.raises(TableError, match="collide"):
+        TableConfig.from_dict({**base, "terrain": {"dem": "elev.tif"},
+                               "features": {"terrain_slope": {"path": "slope.tif", "units": "m/m", "definition": "s"}}})
+    with pytest.raises(TableError, match="unknown"):
+        TableConfig.from_dict({**base, "terrain": {"dem": "elev.tif", "products": ["roughness"]},
+                               "features": {"slope": {"path": "slope.tif", "units": "m/m", "definition": "s"}}})
+
+
+def test_terrain_reads_a_float_predictor_geotiff(site):
+    """WhiteboxTools writes nothing for a float-predictor GeoTIFF; the writer routes a plain copy."""
+    rows, cols = np.mgrid[0:H, 0:W]
+    dem = (500.0 - 2.0 * rows + 0.01 * cols).astype("float32")
+    prof = dict(driver="GTiff", height=H, width=W, count=1, dtype="float32", crs=CRS, nodata=-9999.0,
+                transform=from_origin(X0, Y0, RES, RES), compress="deflate", predictor=3)
+    with rasterio.open(site / "dem_p3.tif", "w", **prof) as dst:
+        dst.write(dem, 1)
+    raw = {"site": "demo", "data_dir": str(site), "extent": "dem_p3.tif", "output": str(site / "p3.parquet"),
+           "features": {"elevation": {"path": "dem_p3.tif", "units": "m", "definition": "e"}},
+           "terrain": {"dem": "dem_p3.tif", "products": ["slope", "aspect"]}}
+    write_table(TableConfig.from_dict(raw))
+    df, _ = _read(site / "p3.parquet")
+    assert df.terrain_slope.median() == pytest.approx(0.2, abs=0.01)

@@ -28,6 +28,14 @@ Config shape (paths are relative to `data_dir` unless absolute):
     splits:
       official: {polygons: split_polygons.gpkg, id_field: id,
                  assign: {train: [1, 2], test: [3], holdout: [4]}}
+    terrain:                              # optional: terrain features from this repo's one method
+      dem: elevation_aligned.tif          # on the table grid
+      products: [slope, drainage_area, G, curvature, aspect]
+
+`terrain` adds `terrain_<product>` features computed by `physics/terrain.py` (WhiteboxTools,
+filled DEM, D-infinity, G = a S^(7/6)) on the given DEM, with the same units and definition at
+every site of the same cell size. Terrain built elsewhere (Landlab, a 2 m DEM averaged) is a
+different definition and the ML side will say so. Products are cached beside the table.
 
 Columns: `cell_id` (row * width + col), `row`, `col`, `x`, `y` (cell centre),
 the features under their own names, then `label_<name>`, `split_<name>` and
@@ -73,6 +81,13 @@ OVERLAP = ("error", "unknown")
 RESERVED_PREFIXES = ("label_", "split_", "group_")
 POSITION_COLUMNS = ("cell_id", "row", "col", "x", "y")
 _NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+TERRAIN_PRODUCTS = {
+    "slope": ("m/m", "slope of the filled DEM (WhiteboxTools)"),
+    "drainage_area": ("m2", "D-infinity specific catchment area of the filled DEM x cell width"),
+    "G": ("m", "G = a S^(7/6), a the D-infinity specific catchment area, S the slope"),
+    "curvature": ("1/m", "plan curvature of the DEM (WhiteboxTools)"),
+    "aspect": ("degrees", "aspect clockwise from north (WhiteboxTools)"),
+}
 
 
 class TableError(ValueError):
@@ -298,6 +313,23 @@ class SplitSpec:
 
 
 @dataclass
+class TerrainSpec:
+    dem: Path
+    products: list[str]
+    cache_dir: Path | None = None
+
+    @classmethod
+    def parse(cls, d: dict[str, Any], base: Path) -> "TerrainSpec":
+        _check_keys("terrain", d, {"dem", "products", "cache_dir"}, {"dem"})
+        products = list(d.get("products") or TERRAIN_PRODUCTS)
+        bad = sorted(set(products) - set(TERRAIN_PRODUCTS))
+        if bad:
+            raise TableError(f"terrain.products: unknown {bad}; choose from {list(TERRAIN_PRODUCTS)}")
+        return cls(dem=_resolve(base, d["dem"]), products=products,
+                   cache_dir=Path(d["cache_dir"]).expanduser() if d.get("cache_dir") else None)
+
+
+@dataclass
 class TableConfig:
     site: str
     extent: Path
@@ -305,6 +337,7 @@ class TableConfig:
     features: list[FeatureSpec]
     labels: list[LabelSpec] = field(default_factory=list)
     splits: list[SplitSpec] = field(default_factory=list)
+    terrain: TerrainSpec | None = None
     data_dir: Path | None = None
     description: str = ""
     config_path: Path | None = None
@@ -326,7 +359,7 @@ class TableConfig:
     @classmethod
     def from_dict(cls, raw: dict[str, Any], config_dir: Path | None = None) -> "TableConfig":
         _check_keys("table config", raw, {"site", "data_dir", "extent", "output", "features", "labels",
-                                          "splits", "description"}, {"site", "extent", "output", "features"})
+                                          "splits", "terrain", "description"}, {"site", "extent", "output", "features"})
         data_dir = Path(raw["data_dir"]).expanduser() if raw.get("data_dir") else None
         base = data_dir or config_dir or Path(".")
         features_raw = raw["features"]
@@ -337,7 +370,12 @@ class TableConfig:
                   features=[FeatureSpec.parse(n, d or {}, base) for n, d in features_raw.items()],
                   labels=[LabelSpec.parse(n, d or {}, base) for n, d in (raw.get("labels") or {}).items()],
                   splits=[SplitSpec.parse(n, d or {}, base) for n, d in (raw.get("splits") or {}).items()],
+                  terrain=TerrainSpec.parse(raw["terrain"], base) if raw.get("terrain") else None,
                   data_dir=data_dir, description=str(raw.get("description", "")))
+        if cfg.terrain is not None:
+            clash = sorted({f"terrain_{p}" for p in cfg.terrain.products} & {f.name for f in cfg.features})
+            if clash:
+                raise TableError(f"features {clash} collide with the terrain products; rename them")
         if cfg.output.suffix != ".parquet":
             raise TableError(f"output must end in .parquet: {cfg.output}")
         return cfg
@@ -421,6 +459,66 @@ def build_feature(spec: FeatureSpec, grid: Grid) -> tuple[np.ndarray, dict[str, 
             "valid_rows": int(finite.size), "min": float(finite.min()), "max": float(finite.max()),
             "median": float(np.median(finite))}
     return values, info
+
+
+# ─────────────────────────────────────────────────────────────── terrain
+
+def build_terrain(spec: TerrainSpec, grid: Grid, output: Path) -> dict[str, tuple[np.ndarray, dict[str, Any]]]:
+    """Terrain features from this repo's one terrain method, cached beside the table.
+
+    The cache is reused only while the DEM's size and modification time are unchanged.
+    """
+    from .physics.terrain import TerrainParams, driving_index, mask_edges, plan_curvature, route, valid_cells
+    from .raster import read_float, write_float
+
+    _read(spec.dem, grid, "terrain.dem")                       # same grid, or GridMismatch
+    cache = spec.cache_dir or output.with_name(output.stem + "_terrain")
+    stamp = {"dem": str(spec.dem.resolve()), "size": spec.dem.stat().st_size,
+             "mtime": spec.dem.stat().st_mtime, "alpha": TerrainParams().alpha}
+    stamp_path = cache / "terrain.json"
+    files = {p: cache / f"terrain_{p}.tif" for p in TERRAIN_PRODUCTS}
+    fresh = stamp_path.exists() and json.loads(stamp_path.read_text()) == stamp and all(f.exists() for f in files.values())
+    if not fresh:
+        print(f"  terrain: routing {spec.dem.name} (WhiteboxTools D-infinity) -> {cache}")
+        work = cache / "_work"
+        work.mkdir(parents=True, exist_ok=True)
+        # WhiteboxTools cannot read every GeoTIFF flavour (a float predictor, for one) and then
+        # writes nothing. Route a plain float32 copy with -9999 as nodata.
+        dem_arr, dem_profile = read_float(spec.dem)
+        dem = work / "dem.tif"
+        plain = {k: v for k, v in dem_profile.items()
+                 if k not in ("compress", "predictor", "tiled", "blockxsize", "blockysize", "interleave")}
+        write_float(dem, dem_arr, {**plain, "driver": "GTiff"})
+        slope, sca, profile = route(dem, work, "dem", fill_sinks=True)
+        cell = abs(float(profile["transform"].a))
+        write_float(files["slope"], slope, profile)
+        write_float(files["drainage_area"], sca * cell, profile)
+        write_float(files["G"], driving_index(sca, slope, TerrainParams().alpha), profile)
+        curv, _ = plan_curvature(dem, work, "dem")
+        write_float(files["curvature"], curv, profile)
+        from .physics.terrain import _whitebox
+        aspect_path = work / "aspect_dem.tif"
+        _whitebox().aspect(str(dem), str(aspect_path))
+        if not aspect_path.exists():
+            raise TableError(f"WhiteboxTools wrote no aspect for {dem}")
+        aspect, _ = read_float(aspect_path)
+        write_float(files["aspect"], mask_edges(aspect, valid_cells(dem)), profile)
+        stamp_path.write_text(json.dumps(stamp))
+    res = abs(float(grid.transform.a))
+    out = {}
+    for product in spec.products:
+        units, desc = TERRAIN_PRODUCTS[product]
+        arr, _ = _read(files[product], grid, f"terrain {product}")
+        values = arr[grid.valid]
+        finite = values[np.isfinite(values)]
+        if finite.size == 0:
+            raise TableError(f"terrain {product}: no valid values inside the extent")
+        info = {"units": units, "definition": f"{desc}; pci-source-zones terrain on a {res:g} m DEM",
+                "source": str(spec.dem), "path": str(files[product]), "scale": None, "dtype": str(values.dtype),
+                "valid_rows": int(finite.size), "min": float(finite.min()), "max": float(finite.max()),
+                "median": float(np.median(finite))}
+        out[f"terrain_{product}"] = (values, info)
+    return out
 
 
 # ─────────────────────────────────────────────────────────────── labels
@@ -657,7 +755,8 @@ def write_table(cfg: TableConfig, *, overwrite: bool = False) -> dict[str, Any]:
 
     if cfg.output.exists() and not overwrite:
         raise TableError(f"{cfg.output} exists; pass --overwrite to replace it")
-    names = [f.name for f in cfg.features] + [f"label_{l.name}" for l in cfg.labels] \
+    names = [f.name for f in cfg.features] + [f"terrain_{p}" for p in (cfg.terrain.products if cfg.terrain else [])] \
+        + [f"label_{l.name}" for l in cfg.labels] \
         + [f"split_{s.name}" for s in cfg.splits] + [f"group_{s.name}" for s in cfg.splits]
     dupes = sorted({n for n in names if names.count(n) > 1})
     if dupes:
@@ -683,6 +782,13 @@ def write_table(cfg: TableConfig, *, overwrite: bool = False) -> dict[str, Any]:
         meta_features[spec.name] = info
         print(f"  feature {spec.name:<26} {info['units']:<14} valid {info['valid_rows']:>10,}  "
               f"median {info['median']:.4g}")
+
+    if cfg.terrain is not None:
+        for name, (values, info) in build_terrain(cfg.terrain, grid, cfg.output).items():
+            columns[name] = pa.array(values, from_pandas=True)
+            meta_features[name] = info
+            print(f"  feature {name:<26} {info['units']:<14} valid {info['valid_rows']:>10,}  "
+                  f"median {info['median']:.4g}")
 
     meta_labels = {}
     for spec in cfg.labels:
